@@ -135,6 +135,7 @@ class MainWindow(QMainWindow):
     def _setup_connections(self):
         """Set up signal connections"""
         self.setup_tab.process_requested.connect(self._process_data)
+        self.setup_tab.export_requested.connect(self._export_complete)
     
     def _process_data(self):
         """Process selected files and sheets"""
