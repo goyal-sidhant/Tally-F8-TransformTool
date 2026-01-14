@@ -277,6 +277,8 @@ class ColumnListWidget(QGroupBox):
     def __init__(self, parent=None):
         super().__init__("Column List", parent)
         self.columns = {}  # col_name -> {'type': str, 'sum': float/None, 'is_numeric': bool}
+        self._all_column_data = []  # Store original data for filtering
+        self._current_sort = ('name', True)  # (field, ascending)
         self._init_ui()
     
     def _init_ui(self):
@@ -287,6 +289,44 @@ class ColumnListWidget(QGroupBox):
         legend.setStyleSheet("color: gray; font-size: 10px;")
         legend.setWordWrap(True)
         layout.addWidget(legend)
+        
+        # Search box
+        search_layout = QHBoxLayout()
+        search_layout.addWidget(QLabel("Search:"))
+        self.txt_search = QLineEdit()
+        self.txt_search.setPlaceholderText("Filter columns by name...")
+        self.txt_search.textChanged.connect(self._apply_filter)
+        search_layout.addWidget(self.txt_search)
+        
+        # Clear search button
+        self.btn_clear_search = QPushButton("×")
+        self.btn_clear_search.setMaximumWidth(25)
+        self.btn_clear_search.clicked.connect(lambda: self.txt_search.clear())
+        search_layout.addWidget(self.btn_clear_search)
+        
+        layout.addLayout(search_layout)
+        
+        # Sort options
+        sort_layout = QHBoxLayout()
+        sort_layout.addWidget(QLabel("Sort by:"))
+        
+        self.btn_sort_name = QPushButton("Name ↑")
+        self.btn_sort_name.setMaximumWidth(80)
+        self.btn_sort_name.clicked.connect(lambda: self._toggle_sort('name'))
+        sort_layout.addWidget(self.btn_sort_name)
+        
+        self.btn_sort_type = QPushButton("Type")
+        self.btn_sort_type.setMaximumWidth(80)
+        self.btn_sort_type.clicked.connect(lambda: self._toggle_sort('type'))
+        sort_layout.addWidget(self.btn_sort_type)
+        
+        self.btn_sort_sum = QPushButton("Sum")
+        self.btn_sort_sum.setMaximumWidth(80)
+        self.btn_sort_sum.clicked.connect(lambda: self._toggle_sort('sum'))
+        sort_layout.addWidget(self.btn_sort_sum)
+        
+        sort_layout.addStretch()
+        layout.addLayout(sort_layout)
         
         # Column table
         self.table = QTableWidget()
@@ -303,6 +343,13 @@ class ColumnListWidget(QGroupBox):
         # Action buttons
         btn_layout = QHBoxLayout()
         
+        self.btn_auto_detect = QPushButton("Auto-detect Tax Cols")
+        self.btn_auto_detect.setToolTip("Automatically mark columns containing CGST, SGST, IGST, CESS as Tax")
+        self.btn_auto_detect.clicked.connect(self._auto_detect_tax_columns)
+        btn_layout.addWidget(self.btn_auto_detect)
+        
+        btn_layout.addStretch()
+        
         self.btn_mark_tax = QPushButton("Mark as Tax")
         self.btn_mark_tax.clicked.connect(lambda: self._mark_selected('Tax'))
         btn_layout.addWidget(self.btn_mark_tax)
@@ -317,18 +364,113 @@ class ColumnListWidget(QGroupBox):
         
         layout.addLayout(btn_layout)
     
+    def _auto_detect_tax_columns(self):
+        """Automatically detect and mark tax columns based on common patterns"""
+        tax_patterns = ['CGST', 'SGST', 'IGST', 'CESS', 'GST @', 'GST@', 
+                        'Central GST', 'State GST', 'Integrated GST', 'Compensation Cess']
+        
+        marked_count = 0
+        for col_name in self.columns.keys():
+            # Skip Standard columns
+            if self.columns[col_name]['type'] == 'Standard':
+                continue
+            
+            # Check if column name contains any tax pattern
+            col_upper = col_name.upper()
+            for pattern in tax_patterns:
+                if pattern.upper() in col_upper:
+                    if self.columns[col_name]['type'] != 'Tax':
+                        self.columns[col_name]['type'] = 'Tax'
+                        
+                        # Update _all_column_data too
+                        for col_data in self._all_column_data:
+                            if col_data['name'] == col_name:
+                                col_data['type'] = 'Tax'
+                                break
+                        
+                        self.column_marked.emit(col_name, 'Tax')
+                        marked_count += 1
+                    break
+        
+        self._apply_filter()
+        
+        if marked_count > 0:
+            QMessageBox.information(self, "Auto-detect Complete", 
+                f"Marked {marked_count} columns as Tax based on naming patterns.\n\n"
+                "Patterns detected: CGST, SGST, IGST, CESS, GST @, etc.")
+        else:
+            QMessageBox.information(self, "Auto-detect Complete", 
+                "No additional tax columns detected.\n\n"
+                "You can manually mark columns using 'Mark as Tax' button.")
+    
+    def _toggle_sort(self, field: str):
+        """Toggle sort on a field"""
+        current_field, ascending = self._current_sort
+        
+        if current_field == field:
+            # Toggle direction
+            ascending = not ascending
+        else:
+            # New field, default to ascending
+            ascending = True
+        
+        self._current_sort = (field, ascending)
+        self._update_sort_buttons()
+        self._apply_filter()
+    
+    def _update_sort_buttons(self):
+        """Update sort button labels to show current sort"""
+        field, ascending = self._current_sort
+        arrow = "↑" if ascending else "↓"
+        
+        self.btn_sort_name.setText("Name" + (f" {arrow}" if field == 'name' else ""))
+        self.btn_sort_type.setText("Type" + (f" {arrow}" if field == 'type' else ""))
+        self.btn_sort_sum.setText("Sum" + (f" {arrow}" if field == 'sum' else ""))
+    
+    def _apply_filter(self):
+        """Apply search filter and sort to the table"""
+        search_text = self.txt_search.text().lower().strip()
+        field, ascending = self._current_sort
+        
+        # Filter columns
+        if search_text:
+            filtered = [c for c in self._all_column_data if search_text in c['name'].lower()]
+        else:
+            filtered = self._all_column_data.copy()
+        
+        # Sort columns
+        if field == 'name':
+            filtered.sort(key=lambda x: x['name'].lower(), reverse=not ascending)
+        elif field == 'type':
+            type_order = {'Tax': 0, 'Excluded': 1, 'Standard': 2, 'Taxable': 3}
+            filtered.sort(key=lambda x: (type_order.get(x['type'], 99), x['name'].lower()), reverse=not ascending)
+        elif field == 'sum':
+            # Sort by sum, with non-numeric at the end
+            def sum_key(x):
+                if x.get('is_numeric') and x.get('sum') is not None:
+                    return (0, -x['sum'] if ascending else x['sum'])
+                return (1, x['name'].lower())
+            filtered.sort(key=sum_key, reverse=not ascending)
+        
+        # Update table
+        self.table.setRowCount(0)
+        for col_info in filtered:
+            self._add_column_row(col_info)
+    
     def set_columns(self, column_data: List[Dict]):
         """
         Set columns with their data.
         column_data: List of {'name': str, 'type': str, 'sum': float/None, 'is_numeric': bool}
         """
         self.columns.clear()
-        self.table.setRowCount(0)
+        self._all_column_data = []
         
         for col_info in column_data:
             name = col_info['name']
             self.columns[name] = col_info
-            self._add_column_row(col_info)
+            self._all_column_data.append(col_info)
+        
+        self._apply_filter()
     
     def _add_column_row(self, col_info: Dict):
         """Add a column row to the table"""
@@ -390,15 +532,16 @@ class ColumnListWidget(QGroupBox):
                         continue
                     
                     self.columns[col_name]['type'] = mark_type
+                    
+                    # Update _all_column_data too
+                    for col_data in self._all_column_data:
+                        if col_data['name'] == col_name:
+                            col_data['type'] = mark_type
+                            break
+                    
                     self.column_marked.emit(col_name, mark_type)
         
-        self._refresh_table()
-    
-    def _refresh_table(self):
-        """Refresh table display"""
-        self.table.setRowCount(0)
-        for name, info in self.columns.items():
-            self._add_column_row({'name': name, **info})
+        self._apply_filter()
     
     def get_excluded_columns(self) -> List[str]:
         """Get list of excluded column names"""
@@ -424,11 +567,23 @@ class TaxConfigWidget(QGroupBox):
     
     def __init__(self, parent=None):
         super().__init__("Tax Configuration", parent)
-        self._available_columns = []
+        self._tax_marked_columns = []  # Only columns marked as Tax in Column List
+        self._combo_widgets = []  # Keep track of combo widgets
         self._init_ui()
     
     def _init_ui(self):
         layout = QVBoxLayout(self)
+        
+        # Status/Counter label
+        self.lbl_status = QLabel("Tax columns: 0 marked, 0 assigned")
+        self.lbl_status.setStyleSheet("font-weight: bold; color: #4472C4; padding: 5px; background-color: #E8F0FE; border-radius: 3px;")
+        layout.addWidget(self.lbl_status)
+        
+        # Info label
+        info_label = QLabel("Step 1: Mark columns as Tax in Column List. Step 2: Assign them to Tax Type + Rate below.")
+        info_label.setStyleSheet("color: gray; font-size: 10px;")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
         
         # Table
         self.table = QTableWidget()
@@ -452,35 +607,89 @@ class TaxConfigWidget(QGroupBox):
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
     
-    def set_available_columns(self, columns: List[str]):
-        """Set available columns for selection"""
-        self._available_columns = columns
-        self._update_column_dropdowns()
+    def set_tax_marked_columns(self, columns: List[str]):
+        """Set columns that are marked as Tax in Column List - only these appear in dropdowns"""
+        self._tax_marked_columns = sorted(columns)
+        self._refresh_all_dropdowns()
+        self._update_status()
     
-    def _get_used_columns(self, exclude_row: int = -1) -> Set[str]:
-        """Get set of columns already used in other rows"""
-        used = set()
+    def _get_assigned_columns(self) -> Set[str]:
+        """Get all columns currently assigned to any row"""
+        assigned = set()
+        for row in range(self.table.rowCount()):
+            combo = self.table.cellWidget(row, 2)
+            if combo and isinstance(combo, MultiSelectComboBox):
+                assigned.update(combo.get_selected())
+        return assigned
+    
+    def _get_assigned_columns_except(self, exclude_row: int) -> Set[str]:
+        """Get columns assigned in other rows (not the excluded row)"""
+        assigned = set()
         for row in range(self.table.rowCount()):
             if row == exclude_row:
                 continue
-            
             combo = self.table.cellWidget(row, 2)
             if combo and isinstance(combo, MultiSelectComboBox):
-                used.update(combo.get_selected())
-        
-        return used
+                assigned.update(combo.get_selected())
+        return assigned
     
-    def _update_column_dropdowns(self):
-        """Update all column dropdowns with current available/used columns"""
+    def _refresh_all_dropdowns(self):
+        """Refresh all dropdown widgets based on current state"""
+        all_assigned = self._get_assigned_columns()
+        all_tax_columns_assigned = len(all_assigned) >= len(self._tax_marked_columns) and len(self._tax_marked_columns) > 0
+        
         for row in range(self.table.rowCount()):
             combo = self.table.cellWidget(row, 2)
             if combo and isinstance(combo, MultiSelectComboBox):
-                used = self._get_used_columns(exclude_row=row)
-                combo.set_items(self._available_columns, disabled=used)
+                # Get currently selected items in this combo
+                current_selection = combo.get_selected()
+                # Get items assigned in OTHER rows
+                assigned_elsewhere = self._get_assigned_columns_except(row)
+                
+                # Update the combo - show only tax-marked columns, disable those assigned elsewhere
+                combo.set_items(self._tax_marked_columns, disabled=assigned_elsewhere)
+                # Restore selection
+                combo.set_selected(current_selection)
+                
+                # If all tax columns are assigned and this row has none, disable the combo
+                if all_tax_columns_assigned and not current_selection:
+                    combo.setEnabled(False)
+                    combo.lineEdit().setPlaceholderText("All tax columns assigned")
+                else:
+                    combo.setEnabled(True)
+                    combo.lineEdit().setPlaceholderText("Select columns...")
+    
+    def _update_status(self):
+        """Update the status label showing assignment progress"""
+        total_marked = len(self._tax_marked_columns)
+        total_assigned = len(self._get_assigned_columns())
+        
+        if total_marked == 0:
+            status_text = "No tax columns marked. Mark columns as Tax in Column List first."
+            color = "#C65911"  # Orange
+        elif total_assigned == 0:
+            status_text = f"Tax columns: {total_marked} marked, 0 assigned. Select columns in dropdowns below."
+            color = "#C65911"  # Orange
+        elif total_assigned < total_marked:
+            status_text = f"Tax columns: {total_assigned} / {total_marked} assigned ({total_marked - total_assigned} remaining)"
+            color = "#4472C4"  # Blue
+        else:
+            status_text = f"✓ All {total_marked} tax columns assigned"
+            color = "#70AD47"  # Green
+        
+        self.lbl_status.setText(status_text)
+        self.lbl_status.setStyleSheet(f"font-weight: bold; color: {color}; padding: 5px; background-color: #F0F0F0; border-radius: 3px;")
+    
+    def _on_combo_selection_changed(self):
+        """Handle when any combo box selection changes"""
+        self._refresh_all_dropdowns()
+        self._update_status()
+        self.config_changed.emit()
     
     def set_config(self, tax_config: List[Dict]):
         """Set tax configuration data"""
         self.table.setRowCount(0)
+        self._combo_widgets.clear()
         
         for row_data in tax_config:
             row = self.table.rowCount()
@@ -495,21 +704,19 @@ class TaxConfigWidget(QGroupBox):
             # TaxRate
             self.table.setItem(row, 1, QTableWidgetItem(row_data.get('TaxRate', '')))
             
-            # ColumnNames - MultiSelect ComboBox (empty by default)
+            # ColumnNames - MultiSelect ComboBox
             col_combo = MultiSelectComboBox()
-            col_combo.set_items(self._available_columns)
-            col_combo.selection_changed.connect(self._on_column_selection_changed)
+            col_combo.set_items(self._tax_marked_columns)
+            col_combo.selection_changed.connect(self._on_combo_selection_changed)
             self.table.setCellWidget(row, 2, col_combo)
+            self._combo_widgets.append(col_combo)
             
             # Delimiter
             self.table.setItem(row, 3, QTableWidgetItem(row_data.get('Delimiter', ',')))
         
-        self._update_column_dropdowns()
-    
-    def _on_column_selection_changed(self):
-        """Handle column selection change in any row"""
-        self._update_column_dropdowns()
-        self.config_changed.emit()
+        # Refresh dropdowns to show correct state
+        self._refresh_all_dropdowns()
+        self._update_status()
     
     def get_config(self) -> List[Dict]:
         """Get tax configuration data"""
@@ -544,22 +751,31 @@ class TaxConfigWidget(QGroupBox):
         
         # ColumnNames - empty MultiSelect
         col_combo = MultiSelectComboBox()
-        used = self._get_used_columns()
-        col_combo.set_items(self._available_columns, disabled=used)
-        col_combo.selection_changed.connect(self._on_column_selection_changed)
+        assigned_elsewhere = self._get_assigned_columns_except(row)
+        col_combo.set_items(self._tax_marked_columns, disabled=assigned_elsewhere)
+        col_combo.selection_changed.connect(self._on_combo_selection_changed)
         self.table.setCellWidget(row, 2, col_combo)
+        self._combo_widgets.append(col_combo)
         
         # Delimiter
         self.table.setItem(row, 3, QTableWidgetItem(','))
         
+        self._refresh_all_dropdowns()
+        self._update_status()
         self.config_changed.emit()
     
     def _delete_row(self):
         """Delete selected row"""
         current_row = self.table.currentRow()
         if current_row >= 0:
+            # Remove combo from tracking list
+            combo = self.table.cellWidget(current_row, 2)
+            if combo in self._combo_widgets:
+                self._combo_widgets.remove(combo)
+            
             self.table.removeRow(current_row)
-            self._update_column_dropdowns()
+            self._refresh_all_dropdowns()
+            self._update_status()
             self.config_changed.emit()
 
 
@@ -827,9 +1043,13 @@ class SetupTab(QWidget):
         self._scanned_column_data = column_data
         self.column_list.set_columns(column_data)
         
-        # Update tax config available columns
-        all_col_names = [c['name'] for c in column_data]
-        self.tax_config.set_available_columns(all_col_names)
+        # Update tax config with Tax-marked columns only
+        self._update_tax_config_columns()
+    
+    def _update_tax_config_columns(self):
+        """Update Tax Config widget with only Tax-marked columns from Column List"""
+        tax_marked = self.column_list.get_tax_columns()
+        self.tax_config.set_tax_marked_columns(tax_marked)
     
     def _on_column_marked(self, col_name: str, mark_type: str):
         """Handle column marking from column list"""
@@ -837,6 +1057,9 @@ class SetupTab(QWidget):
             self.exclusion_list.add_column(col_name)
         elif mark_type in ('Taxable', 'Tax'):
             self.exclusion_list.remove_column(col_name)
+        
+        # Update Tax Config with current Tax-marked columns
+        self._update_tax_config_columns()
     
     def _on_process_clicked(self):
         """Handle process button click"""
