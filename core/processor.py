@@ -120,10 +120,25 @@ class GSTProcessor:
         data.columns = new_headers
         data.reset_index(drop=True, inplace=True)
         
-        # Remove Grand Total rows
-        first_col = data.columns[0]
-        mask = data[first_col].apply(lambda x: 
-            'GRAND TOTAL' not in str(x).upper() if pd.notna(x) else True)
+        # Remove Grand Total rows - check Particulars column (or first 3 columns)
+        # Grand Total can appear in Particulars column, not necessarily first column
+        columns_to_check = []
+        if 'Particulars' in data.columns:
+            columns_to_check.append('Particulars')
+        # Also check first 3 columns as fallback
+        for col in data.columns[:3]:
+            if col not in columns_to_check:
+                columns_to_check.append(col)
+        
+        # Create mask - row is kept if NONE of the checked columns contain "GRAND TOTAL"
+        def is_not_grand_total(row):
+            for col in columns_to_check:
+                val = row.get(col, '')
+                if pd.notna(val) and 'GRAND TOTAL' in str(val).upper():
+                    return False
+            return True
+        
+        mask = data.apply(is_not_grand_total, axis=1)
         data = data[mask].copy()
         data.reset_index(drop=True, inplace=True)
         
