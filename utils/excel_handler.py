@@ -90,8 +90,10 @@ class ExcelWriter:
     # Styling constants
     HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     HEADER_FONT = Font(bold=True, color="FFFFFF", size=11)
-    TAX_COL_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    EXCLUDE_COL_FILL = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+    TAX_COL_FILL = PatternFill(start_color="B4C6E7", end_color="B4C6E7", fill_type="solid")  # Light blue for Tax
+    TAXABLE_COL_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # Light green for Taxable
+    EXCLUDE_COL_FILL = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")  # Light yellow for Excluded
+    STANDARD_COL_FILL = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")  # Light sage for Standard
     BORDER = Border(
         left=Side(style='thin', color='B4B4B4'),
         right=Side(style='thin', color='B4B4B4'),
@@ -107,7 +109,8 @@ class ExcelWriter:
         metadata: Dict[str, Any],
         tax_config: List[Dict],
         exclusion_list: List[str],
-        column_types: Dict[str, str]
+        column_types: Dict[str, str],
+        column_stats: Dict[str, Dict] = None
     ):
         """
         Write complete output to Excel file with 4 sheets.
@@ -120,31 +123,34 @@ class ExcelWriter:
             tax_config: Tax configuration list
             exclusion_list: Exclusion column list
             column_types: Dict mapping column names to their types
+            column_stats: Dict mapping column names to their stats (type, sum)
         """
+        from openpyxl.worksheet.table import Table, TableStyleInfo
+        
         wb = Workbook()
         
         # Sheet 1: Metadata
         ws_meta = wb.active
         ws_meta.title = "Metadata"
-        ExcelWriter._write_metadata_sheet(ws_meta, metadata, column_types)
+        ExcelWriter._write_metadata_sheet(ws_meta, metadata, column_types, column_stats)
         
         # Sheet 2: Configuration
         ws_config = wb.create_sheet("Configuration")
         ExcelWriter._write_config_sheet(ws_config, tax_config, exclusion_list)
         
-        # Sheet 3: GST Transactions
+        # Sheet 3: GST Transactions (as Excel Table with index)
         ws_gst = wb.create_sheet("GST Transactions")
-        ExcelWriter._write_data_sheet(ws_gst, gst_data, "GST")
+        ExcelWriter._write_data_sheet_as_table(ws_gst, gst_data, "GST", "GSTTable")
         
-        # Sheet 4: Non-GST Transactions
+        # Sheet 4: Non-GST Transactions (as Excel Table with index)
         ws_non_gst = wb.create_sheet("Non-GST Transactions")
-        ExcelWriter._write_data_sheet(ws_non_gst, non_gst_data, "Non-GST")
+        ExcelWriter._write_data_sheet_as_table(ws_non_gst, non_gst_data, "Non-GST", "NonGSTTable")
         
         # Save
         wb.save(filepath)
     
     @staticmethod
-    def _write_metadata_sheet(ws, metadata: Dict[str, Any], column_types: Dict[str, str]):
+    def _write_metadata_sheet(ws, metadata: Dict[str, Any], column_types: Dict[str, str], column_stats: Dict[str, Dict] = None):
         """Write metadata sheet"""
         # Title
         ws['A1'] = "GST Compliance Tool - Processing Report"
@@ -201,12 +207,12 @@ class ExcelWriter:
         ws.cell(row=row, column=4, value=metadata.get('total_gst_rows', 0)).font = Font(bold=True)
         ws.cell(row=row, column=5, value=metadata.get('total_non_gst_rows', 0)).font = Font(bold=True)
         
-        # Column types table
+        # Column Configuration table with Index, Type, Sum
         row += 3
         ws.cell(row=row, column=1, value="Column Configuration").font = Font(bold=True, size=12)
         row += 1
         
-        col_headers = ['Column Name', 'Type']
+        col_headers = ['#', 'Column Name', 'Type', 'Sum']
         for col, header in enumerate(col_headers, 1):
             cell = ws.cell(row=row, column=col, value=header)
             cell.fill = ExcelWriter.HEADER_FILL
@@ -214,27 +220,59 @@ class ExcelWriter:
             cell.border = ExcelWriter.BORDER
         
         row += 1
-        for col_name, col_type in sorted(column_types.items()):
-            cell1 = ws.cell(row=row, column=1, value=col_name)
-            cell2 = ws.cell(row=row, column=2, value=col_type)
+        for idx, (col_name, col_type) in enumerate(sorted(column_types.items()), 1):
+            # Index column
+            cell_idx = ws.cell(row=row, column=1, value=idx)
+            cell_idx.border = ExcelWriter.BORDER
+            cell_idx.alignment = Alignment(horizontal='center')
+            
+            # Column name
+            cell1 = ws.cell(row=row, column=2, value=col_name)
             cell1.border = ExcelWriter.BORDER
+            
+            # Type
+            cell2 = ws.cell(row=row, column=3, value=col_type)
             cell2.border = ExcelWriter.BORDER
             
-            # Color code based on type
-            if 'Tax' in col_type:
-                cell1.fill = ExcelWriter.TAX_COL_FILL
-                cell2.fill = ExcelWriter.TAX_COL_FILL
+            # Sum (from column_stats if available)
+            sum_value = ""
+            if column_stats and col_name in column_stats:
+                stats = column_stats[col_name]
+                if stats.get('is_numeric', False):
+                    sum_value = stats.get('sum', 0)
+                else:
+                    sum_value = "Text"
+            
+            cell3 = ws.cell(row=row, column=4, value=sum_value)
+            cell3.border = ExcelWriter.BORDER
+            if isinstance(sum_value, (int, float)):
+                cell3.number_format = '#,##0.00'
+            
+            # Color code based on type - different colors for each type
+            if col_type == 'Tax':
+                fill = ExcelWriter.TAX_COL_FILL  # Light blue
+            elif col_type == 'Taxable':
+                fill = ExcelWriter.TAXABLE_COL_FILL  # Light green
             elif col_type == 'Excluded':
-                cell1.fill = ExcelWriter.EXCLUDE_COL_FILL
-                cell2.fill = ExcelWriter.EXCLUDE_COL_FILL
+                fill = ExcelWriter.EXCLUDE_COL_FILL  # Light yellow
+            elif col_type == 'Standard':
+                fill = ExcelWriter.STANDARD_COL_FILL  # Light sage
+            else:
+                fill = None
+            
+            if fill:
+                cell_idx.fill = fill
+                cell1.fill = fill
+                cell2.fill = fill
+                cell3.fill = fill
             
             row += 1
         
         # Adjust column widths
-        ws.column_dimensions['A'].width = 40
-        ws.column_dimensions['B'].width = 25
+        ws.column_dimensions['A'].width = 8
+        ws.column_dimensions['B'].width = 35
         ws.column_dimensions['C'].width = 15
-        ws.column_dimensions['D'].width = 15
+        ws.column_dimensions['D'].width = 18
         ws.column_dimensions['E'].width = 15
         ws.column_dimensions['F'].width = 20
     
@@ -278,46 +316,67 @@ class ExcelWriter:
         ws.column_dimensions['F'].width = 20
     
     @staticmethod
-    def _write_data_sheet(ws, df: pd.DataFrame, sheet_type: str):
-        """Write data sheet with proper formatting"""
+    def _write_data_sheet_as_table(ws, df: pd.DataFrame, sheet_type: str, table_name: str):
+        """Write data sheet as Excel Table (Ctrl+T style) with index column"""
+        from openpyxl.worksheet.table import Table, TableStyleInfo
+        
         if df is None or len(df) == 0:
             ws['A1'] = f"No {sheet_type} transactions found"
             return
         
+        # Add index column to dataframe
+        df_with_index = df.copy()
+        df_with_index.insert(0, '#', range(1, len(df) + 1))
+        
         # Write headers
-        for col_idx, col_name in enumerate(df.columns, 1):
+        for col_idx, col_name in enumerate(df_with_index.columns, 1):
             cell = ws.cell(row=1, column=col_idx, value=col_name)
-            cell.fill = ExcelWriter.HEADER_FILL
-            cell.font = ExcelWriter.HEADER_FONT
-            cell.border = ExcelWriter.BORDER
-            cell.alignment = Alignment(horizontal='center', wrap_text=True)
+            # Don't apply manual formatting - let the table style handle it
         
         # Write data
-        for row_idx, row in enumerate(df.itertuples(index=False), 2):
+        for row_idx, row in enumerate(df_with_index.itertuples(index=False), 2):
             for col_idx, value in enumerate(row, 1):
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
-                cell.border = ExcelWriter.BORDER
                 
                 # Format numbers
                 if isinstance(value, (int, float)) and not pd.isna(value):
-                    cell.number_format = '#,##0.00'
+                    if col_idx == 1:  # Index column - no decimals
+                        cell.number_format = '#,##0'
+                    else:
+                        cell.number_format = '#,##0.00'
         
-        # Auto-adjust column widths (with max limit)
-        for col_idx, col_name in enumerate(df.columns, 1):
+        # Auto-adjust column widths
+        for col_idx, col_name in enumerate(df_with_index.columns, 1):
             max_length = len(str(col_name))
-            for row_idx in range(2, min(102, len(df) + 2)):  # Sample first 100 rows
+            for row_idx in range(2, min(102, len(df_with_index) + 2)):
                 cell_value = ws.cell(row=row_idx, column=col_idx).value
                 if cell_value:
                     max_length = max(max_length, len(str(cell_value)))
             
-            adjusted_width = min(max_length + 2, 50)  # Max width of 50
+            adjusted_width = min(max_length + 2, 50)
             ws.column_dimensions[get_column_letter(col_idx)].width = adjusted_width
         
-        # Freeze header row
-        ws.freeze_panes = 'A2'
+        # Create Excel Table
+        last_col = get_column_letter(len(df_with_index.columns))
+        last_row = len(df_with_index) + 1
+        table_ref = f"A1:{last_col}{last_row}"
         
-        # Add auto filter
-        ws.auto_filter.ref = ws.dimensions
+        # Create table with style
+        table = Table(displayName=table_name, ref=table_ref)
+        
+        # Use a medium blue style (TableStyleMedium2 is a nice blue)
+        style = TableStyleInfo(
+            name="TableStyleMedium2",
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False
+        )
+        table.tableStyleInfo = style
+        
+        ws.add_table(table)
+        
+        # NO freeze panes - user requested no freezing
 
 
 class ExcelExporter:

@@ -510,6 +510,9 @@ class GSTProcessor:
         sources: List of (dataframe, source_name) tuples
         source_name format: "filename.xlsx | SheetName"
         """
+        # Suppress FutureWarning for fillna downcasting
+        pd.set_option('future.no_silent_downcasting', True)
+        
         all_gst = []
         all_non_gst = []
         all_metadata = []
@@ -533,24 +536,24 @@ class GSTProcessor:
         # Merge all GST data
         if all_gst:
             merged_gst = pd.concat(all_gst, ignore_index=True, sort=False)
-            # Fill NA values - handle different column types appropriately
+            # Fill NA values - convert column by column to avoid FutureWarning
             for col in merged_gst.columns:
-                if merged_gst[col].dtype in ['float64', 'int64']:
-                    merged_gst[col] = merged_gst[col].fillna(0)
+                if pd.api.types.is_numeric_dtype(merged_gst[col]):
+                    merged_gst.loc[:, col] = merged_gst[col].fillna(0)
                 else:
-                    merged_gst[col] = merged_gst[col].fillna('')
+                    merged_gst.loc[:, col] = merged_gst[col].fillna('')
         else:
             merged_gst = pd.DataFrame()
         
         # Merge all Non-GST data
         if all_non_gst:
             merged_non_gst = pd.concat(all_non_gst, ignore_index=True, sort=False)
-            # Fill NA values - handle different column types appropriately
+            # Fill NA values - convert column by column to avoid FutureWarning
             for col in merged_non_gst.columns:
-                if merged_non_gst[col].dtype in ['float64', 'int64']:
-                    merged_non_gst[col] = merged_non_gst[col].fillna(0)
+                if pd.api.types.is_numeric_dtype(merged_non_gst[col]):
+                    merged_non_gst.loc[:, col] = merged_non_gst[col].fillna(0)
                 else:
-                    merged_non_gst[col] = merged_non_gst[col].fillna('')
+                    merged_non_gst.loc[:, col] = merged_non_gst[col].fillna('')
         else:
             merged_non_gst = pd.DataFrame()
         

@@ -1124,9 +1124,16 @@ class SetupTab(QWidget):
         tax_column_names = self.config_manager.get_all_tax_column_names()
         exclusion_list = self.exclusion_list.get_list()
         
+        # Auto-exclude column names (case-insensitive)
+        auto_exclude_names = ['value', 'gross total', 'gstin/uin', 'gstin', 'uin']
+        
         # Build column data
         column_data = []
+        auto_excluded_cols = []  # Track auto-excluded for notification
+        
         for col_name, stats in sorted(column_stats.items()):
+            col_name_lower = col_name.lower().strip()
+            
             # Determine type
             if col_name in tax_column_names:
                 col_type = 'Tax'
@@ -1134,6 +1141,18 @@ class SetupTab(QWidget):
                 col_type = 'Excluded'
             elif col_name in standard_cols:
                 col_type = 'Standard'
+            # Auto-exclude: text columns (non-numeric)
+            elif not stats['is_numeric']:
+                col_type = 'Excluded'
+                if col_name not in exclusion_list:
+                    auto_excluded_cols.append(f"{col_name} (text)")
+                    self.exclusion_list.add_column(col_name)
+            # Auto-exclude: specific column names
+            elif col_name_lower in auto_exclude_names:
+                col_type = 'Excluded'
+                if col_name not in exclusion_list:
+                    auto_excluded_cols.append(f"{col_name} (auto)")
+                    self.exclusion_list.add_column(col_name)
             else:
                 col_type = 'Taxable'
             
@@ -1239,6 +1258,18 @@ class SetupTab(QWidget):
     def get_column_types(self) -> Dict[str, str]:
         """Get column type mappings"""
         return self.column_list.get_column_types()
+    
+    def get_column_stats(self) -> Dict[str, Dict]:
+        """Get column statistics (type, sum, is_numeric)"""
+        stats = {}
+        for col_data in self._scanned_column_data:
+            name = col_data.get('name', '')
+            stats[name] = {
+                'type': col_data.get('type', ''),
+                'sum': col_data.get('sum', 0),
+                'is_numeric': col_data.get('is_numeric', False)
+            }
+        return stats
     
     def get_scanned_column_data(self) -> List[Dict]:
         """Get full column data from last scan"""

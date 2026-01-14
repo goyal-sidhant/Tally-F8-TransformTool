@@ -262,8 +262,9 @@ class MainWindow(QMainWindow):
             tax_config = self.config_manager.current_config.tax_config
             exclusion_list = self.config_manager.current_config.exclusion_list
             
-            # Get column types
+            # Get column types and stats
             column_types = self.setup_tab.get_column_types()
+            column_stats = self.setup_tab.get_column_stats()
             
             # Write output
             ExcelWriter.write_output(
@@ -273,7 +274,8 @@ class MainWindow(QMainWindow):
                 metadata=metadata,
                 tax_config=tax_config,
                 exclusion_list=exclusion_list,
-                column_types=column_types
+                column_types=column_types,
+                column_stats=column_stats
             )
             
             QMessageBox.information(
