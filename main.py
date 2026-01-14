@@ -179,11 +179,30 @@ class MainWindow(QMainWindow):
             progress.setLabelText("Processing transactions...")
             progress.setValue(20)
             
-            # Create processor
+            # Validate tax configuration
+            is_valid, validation_warnings = self.setup_tab.validate_tax_config()
+            if validation_warnings:
+                progress.close()
+                warning_text = "\n\n".join(validation_warnings)
+                reply = QMessageBox.warning(
+                    self, "Configuration Warnings",
+                    f"{warning_text}\n\nDo you want to continue anyway?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if reply == QMessageBox.No:
+                    return
+                # Re-show progress if continuing
+                progress = QProgressDialog("Processing...", "Cancel", 0, 100, self)
+                progress.setWindowModality(Qt.WindowModal)
+                progress.setValue(20)
+            
+            # Create processor with tax_marked_columns for proper exclusion
             tax_config_df = self.config_manager.get_tax_config_df()
             exclusion_list = self.config_manager.get_exclusion_list()
+            tax_marked_columns = self.setup_tab.get_tax_marked_columns()
             
-            processor = GSTProcessor(tax_config_df, exclusion_list)
+            processor = GSTProcessor(tax_config_df, exclusion_list, tax_marked_columns)
             
             # Process data
             progress.setValue(40)

@@ -88,9 +88,20 @@ class TaxColumnMapper:
 class GSTProcessor:
     """Main processor for GST data transformation"""
     
-    def __init__(self, tax_config: pd.DataFrame, exclusion_list: List[str]):
+    def __init__(self, tax_config: pd.DataFrame, exclusion_list: List[str], 
+                 tax_marked_columns: List[str] = None):
+        """
+        Initialize GST Processor.
+        
+        Args:
+            tax_config: Tax configuration DataFrame
+            exclusion_list: List of columns to exclude
+            tax_marked_columns: List of columns marked as Tax in Column List
+                               (used for exclusion even if not assigned in TaxConfig)
+        """
         self.tax_config = tax_config
         self.exclusion_list = exclusion_list
+        self.tax_marked_columns = tax_marked_columns or []
         self.tax_mapper = TaxColumnMapper(tax_config)
         self.warnings = []
     
@@ -171,17 +182,22 @@ class GSTProcessor:
         return df
     
     def has_gst(self, row: pd.Series, existing_tax_cols: List[str]) -> bool:
-        """Check if row has any GST values"""
-        for col in existing_tax_cols:
-            val = row.get(col, 0)
-            if pd.notna(val) and val != 0:
-                return True
+        """Check if row has any GST values in tax columns"""
+        # Check both TaxConfig-assigned columns AND tax-marked columns
+        all_tax_cols = set(existing_tax_cols) | set(self.tax_marked_columns)
+        
+        for col in all_tax_cols:
+            if col in row.index:
+                val = row.get(col, 0)
+                if pd.notna(val) and val != 0:
+                    return True
         return False
     
     def calculate_taxable_value(self, row: pd.Series, all_columns: List[str], 
                                  tax_columns: List[str]) -> float:
         """Calculate taxable value (sum of non-excluded, non-tax numeric columns)"""
-        columns_to_exclude = set(self.exclusion_list) | set(tax_columns)
+        # Exclude: exclusion_list + TaxConfig columns + Tax-marked columns
+        columns_to_exclude = set(self.exclusion_list) | set(tax_columns) | set(self.tax_marked_columns)
         
         total = 0.0
         for col in all_columns:
@@ -195,7 +211,8 @@ class GSTProcessor:
     def get_active_columns(self, row: pd.Series, all_columns: List[str], 
                            tax_columns: List[str]) -> str:
         """Get active columns with their values, sorted by amount descending"""
-        columns_to_exclude = set(self.exclusion_list) | set(tax_columns)
+        # Exclude: exclusion_list + TaxConfig columns + Tax-marked columns
+        columns_to_exclude = set(self.exclusion_list) | set(tax_columns) | set(self.tax_marked_columns)
         
         active = []
         for col in all_columns:

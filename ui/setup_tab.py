@@ -1125,33 +1125,48 @@ class SetupTab(QWidget):
                 data = df.iloc[header_row_idx + 1:].copy()
                 data.columns = headers
                 
-                # Remove Grand Total rows
-                first_col = headers[0]
-                mask = data[first_col].apply(lambda x: 
-                    'GRAND TOTAL' not in str(x).upper() if pd.notna(x) else True)
+                # Remove Grand Total rows - check Particulars column and first 3 columns
+                columns_to_check = []
+                if 'Particulars' in headers:
+                    columns_to_check.append('Particulars')
+                for col in headers[:3]:
+                    if col not in columns_to_check:
+                        columns_to_check.append(col)
+                
+                def is_not_grand_total(row):
+                    for col in columns_to_check:
+                        val = row.get(col, '')
+                        if pd.notna(val) and 'GRAND TOTAL' in str(val).upper():
+                            return False
+                    return True
+                
+                mask = data.apply(is_not_grand_total, axis=1)
                 data = data[mask]
                 
                 # Collect stats for each column
                 for col in headers:
                     if col not in column_stats:
-                        column_stats[col] = {'sum': 0, 'count': 0, 'is_numeric': True, 'numeric_count': 0}
+                        column_stats[col] = {
+                            'sum': 0, 
+                            'count': 0, 
+                            'numeric_count': 0,
+                            'total_non_null': 0
+                        }
                     
                     try:
                         numeric_values = pd.to_numeric(data[col], errors='coerce')
                         valid_sum = numeric_values.sum()
                         valid_count = numeric_values.notna().sum()
+                        total_non_null = data[col].notna().sum()
                         
                         if valid_count > 0:
                             column_stats[col]['sum'] += valid_sum if pd.notna(valid_sum) else 0
-                            column_stats[col]['numeric_count'] += valid_count
                         
-                        # Check if majority is numeric
-                        total_non_null = data[col].notna().sum()
-                        if total_non_null > 0 and valid_count / total_non_null < 0.5:
-                            column_stats[col]['is_numeric'] = False
+                        column_stats[col]['numeric_count'] += valid_count
+                        column_stats[col]['total_non_null'] += total_non_null
                             
                     except Exception:
-                        column_stats[col]['is_numeric'] = False
+                        pass  # Will be handled when determining is_numeric later
                     
                     column_stats[col]['count'] += len(data)
                     
@@ -1160,6 +1175,18 @@ class SetupTab(QWidget):
         
         if not column_stats:
             return
+        
+        # Determine is_numeric for each column AFTER aggregating all files
+        # Use 80% threshold - column is numeric if at least 80% of non-null values are numbers
+        for col_name, stats in column_stats.items():
+            total_non_null = stats.get('total_non_null', 0)
+            numeric_count = stats.get('numeric_count', 0)
+            
+            if total_non_null > 0:
+                numeric_ratio = numeric_count / total_non_null
+                stats['is_numeric'] = numeric_ratio >= 0.8
+            else:
+                stats['is_numeric'] = False
         
         # Get configured tax columns and exclusion list
         tax_column_names = self.config_manager.get_all_tax_column_names()
@@ -1315,3 +1342,59 @@ class SetupTab(QWidget):
     def get_scanned_column_data(self) -> List[Dict]:
         """Get full column data from last scan"""
         return self._scanned_column_data
+    
+    def get_tax_marked_columns(self) -> List[str]:
+        """Get list of columns marked as Tax in Column List"""
+        return self.column_list.get_tax_columns()
+    
+    def get_assigned_tax_columns(self) -> List[str]:
+        """Get list of columns actually assigned in TaxConfig"""
+        assigned = []
+        for row in self.tax_config.get_config():
+            col_names = row.get('ColumnNames', '')
+            delimiter = row.get('Delimiter', ',')
+            if col_names:
+                cols = [c.strip() for c in col_names.split(delimiter) if c.strip()]
+                assigned.extend(cols)
+        return list(set(assigned))
+    
+    def get_unassigned_tax_columns(self) -> List[str]:
+        """Get Tax-marked columns that are NOT assigned in TaxConfig"""
+        tax_marked = set(self.get_tax_marked_columns())
+        assigned = set(self.get_assigned_tax_columns())
+        return list(tax_marked - assigned)
+    
+    def validate_tax_config(self) -> Tuple[bool, List[str]]:
+        """
+        Validate tax configuration before processing.
+        Returns (is_valid, list_of_warnings)
+        """
+        warnings = []
+        
+        # Check for unassigned Tax columns
+        unassigned = self.get_unassigned_tax_columns()
+        if unassigned:
+            warnings.append(
+                f"Tax-marked columns not assigned in Tax Config:\n  • " + 
+                "\n  • ".join(unassigned) +
+                "\n\nThese columns will be excluded from Taxable Value but won't contribute to Tax Totals."
+            )
+        
+        # Check for duplicate assignments
+        assigned_cols = []
+        for row in self.tax_config.get_config():
+            col_names = row.get('ColumnNames', '')
+            delimiter = row.get('Delimiter', ',')
+            if col_names:
+                cols = [c.strip() for c in col_names.split(delimiter) if c.strip()]
+                for col in cols:
+                    if col in assigned_cols:
+                        warnings.append(f"Column '{col}' is assigned to multiple Tax Config rows (may cause double-counting)")
+                    assigned_cols.append(col)
+        
+        # Check if any Tax columns exist at all
+        tax_marked = self.get_tax_marked_columns()
+        if not tax_marked:
+            warnings.append("No columns marked as Tax. All transactions will be classified as Non-GST.")
+        
+        return (len(warnings) == 0, warnings)
