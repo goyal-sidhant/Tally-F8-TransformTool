@@ -225,6 +225,9 @@ class FileSheetSelector(QGroupBox):
         super().__init__("File & Sheet Selection", parent)
         self.files = {}  # filepath -> {'sheets': [], 'selected': []}
         self._init_ui()
+        
+        # Enable drag and drop
+        self.setAcceptDrops(True)
     
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -250,10 +253,43 @@ class FileSheetSelector(QGroupBox):
         layout.addWidget(scroll)
         
         # Placeholder label
-        self.placeholder = QLabel("No files added. Click 'Add File(s)...' to begin.")
+        self.placeholder = QLabel("No files added.\nClick 'Add File(s)...' or drag && drop Excel files here.")
         self.placeholder.setStyleSheet("color: gray; padding: 20px;")
         self.placeholder.setAlignment(Qt.AlignCenter)
         self.file_layout.addWidget(self.placeholder)
+    
+    def dragEnterEvent(self, event):
+        """Handle drag enter - accept if files are Excel files"""
+        if event.mimeData().hasUrls():
+            # Check if any URL is an Excel file
+            for url in event.mimeData().urls():
+                filepath = url.toLocalFile()
+                if filepath.lower().endswith(('.xlsx', '.xls')):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+    
+    def dragMoveEvent(self, event):
+        """Handle drag move"""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+    
+    def dropEvent(self, event):
+        """Handle file drop"""
+        files_to_add = []
+        
+        for url in event.mimeData().urls():
+            filepath = url.toLocalFile()
+            if filepath.lower().endswith(('.xlsx', '.xls')):
+                files_to_add.append(filepath)
+        
+        if files_to_add:
+            event.acceptProposedAction()
+            self._add_files_from_list(files_to_add)
+        else:
+            event.ignore()
     
     def _add_files(self):
         """Open file dialog and add selected files"""
@@ -262,11 +298,14 @@ class FileSheetSelector(QGroupBox):
             "Excel Files (*.xlsx *.xls);;All Files (*)"
         )
         
-        if not files:
-            return
-        
+        if files:
+            self._add_files_from_list(files)
+    
+    def _add_files_from_list(self, files: List[str]):
+        """Add files from a list of filepaths"""
         from utils.excel_handler import ExcelReader
         
+        added_count = 0
         for filepath in files:
             if filepath in self.files:
                 continue  # Skip duplicates
@@ -278,11 +317,13 @@ class FileSheetSelector(QGroupBox):
                     'selected': sheets.copy()  # Select all by default
                 }
                 self._add_file_widget(filepath)
+                added_count += 1
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Could not read file:\n{filepath}\n\nError: {str(e)}")
         
-        self._update_placeholder()
-        self.files_changed.emit()
+        if added_count > 0:
+            self._update_placeholder()
+            self.files_changed.emit()
     
     def _add_file_widget(self, filepath: str):
         """Add a widget for a file with its sheet checkboxes"""
