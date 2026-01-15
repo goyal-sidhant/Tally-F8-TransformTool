@@ -228,8 +228,16 @@ class GSTProcessor:
         formatted = [f"{col}: {val:,.2f}" for col, val in active]
         return " | ".join(formatted)
     
-    def transform_tax_columns(self, df: pd.DataFrame, existing_mappings: Dict[str, str]) -> pd.DataFrame:
-        """Transform actual tax columns to standardized names"""
+    def transform_tax_columns(self, df: pd.DataFrame, existing_mappings: Dict[str, str], 
+                                keep_originals: bool = True) -> pd.DataFrame:
+        """
+        Transform actual tax columns to standardized names.
+        
+        Args:
+            df: DataFrame to transform
+            existing_mappings: Dict mapping actual column names to standardized names
+            keep_originals: If True, keep original columns for auditing (default True)
+        """
         # Group actual columns by mapped name
         mapped_groups = {}
         for actual_col, mapped_name in existing_mappings.items():
@@ -243,9 +251,11 @@ class GSTProcessor:
             if existing_cols:
                 df[mapped_name] = df[existing_cols].sum(axis=1)
         
-        # Remove original tax columns
-        cols_to_remove = [c for c in existing_mappings.keys() if c in df.columns]
-        df = df.drop(columns=cols_to_remove, errors='ignore')
+        # Keep original tax columns for auditing (don't remove them)
+        # They will remain in their original position for data verification
+        if not keep_originals:
+            cols_to_remove = [c for c in existing_mappings.keys() if c in df.columns]
+            df = df.drop(columns=cols_to_remove, errors='ignore')
         
         return df
     
@@ -474,11 +484,10 @@ class GSTProcessor:
         # Add Tax Rates (Config)
         df['Tax Rates (Config)'] = df.apply(lambda row: self.get_applicable_rates(row), axis=1)
         
-        # Add tax totals
-        totals = df.apply(lambda row: self.calculate_tax_totals(row), axis=1)
-        totals_df = pd.DataFrame(totals.tolist())
-        for col in totals_df.columns:
-            df[col] = totals_df[col]
+        # Add tax totals - CRITICAL: preserve index to avoid misalignment
+        totals = df.apply(lambda row: self.calculate_tax_totals(row), axis=1, result_type='expand')
+        for col in totals.columns:
+            df[col] = totals[col]
         
         # Add Tax Rates (Calculated)
         df['Tax Rates (Calculated)'] = df.apply(lambda row: self.calculate_rate_from_values(row), axis=1)

@@ -317,7 +317,7 @@ class ExcelWriter:
     
     @staticmethod
     def _write_data_sheet_as_table(ws, df: pd.DataFrame, sheet_type: str, table_name: str):
-        """Write data sheet as Excel Table (Ctrl+T style) with index column"""
+        """Write data sheet as Excel Table (Ctrl+T style) with index column and highlighted computed columns"""
         from openpyxl.worksheet.table import Table, TableStyleInfo
         
         if df is None or len(df) == 0:
@@ -328,12 +328,37 @@ class ExcelWriter:
         df_with_index = df.copy()
         df_with_index.insert(0, '#', range(1, len(df) + 1))
         
+        # Define computed/derived columns to highlight with light green
+        computed_columns = {
+            'Active Columns', 'Taxable Value', 'Tax Rates (Config)', 'Tax Rates (Calculated)',
+            'Total CGST', 'Total SGST', 'Total IGST', 'Transaction Type', 'Review Required', 'Source'
+        }
+        
+        # Also highlight transformed tax columns (CGST_X%, SGST_X%, IGST_X%)
+        def is_computed_column(col_name):
+            if col_name in computed_columns:
+                return True
+            if col_name.startswith(('CGST_', 'SGST_', 'IGST_')):
+                return True
+            if col_name == 'CESS':
+                return True
+            return False
+        
+        # Light green fill for computed columns
+        computed_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+        
+        # Track which columns are computed (by index)
+        computed_col_indices = set()
+        for col_idx, col_name in enumerate(df_with_index.columns, 1):
+            if is_computed_column(col_name):
+                computed_col_indices.add(col_idx)
+        
         # Write headers
         for col_idx, col_name in enumerate(df_with_index.columns, 1):
             cell = ws.cell(row=1, column=col_idx, value=col_name)
-            # Don't apply manual formatting - let the table style handle it
+            # Headers will be styled by the table
         
-        # Write data
+        # Write data with highlighting
         for row_idx, row in enumerate(df_with_index.itertuples(index=False), 2):
             for col_idx, value in enumerate(row, 1):
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
@@ -344,6 +369,10 @@ class ExcelWriter:
                         cell.number_format = '#,##0'
                     else:
                         cell.number_format = '#,##0.00'
+                
+                # Highlight computed columns with light green
+                if col_idx in computed_col_indices:
+                    cell.fill = computed_fill
         
         # Auto-adjust column widths
         for col_idx, col_name in enumerate(df_with_index.columns, 1):

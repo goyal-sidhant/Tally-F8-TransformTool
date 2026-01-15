@@ -32,7 +32,7 @@ class MultiSelectPopup(QDialog):
         
         # Search box
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Search...")
+        self.search_box.setPlaceholderText("Type to search...")
         self.search_box.textChanged.connect(self._filter_items)
         layout.addWidget(self.search_box)
         
@@ -50,6 +50,12 @@ class MultiSelectPopup(QDialog):
         self._disabled_items = set()
         self._callback = None
     
+    def showEvent(self, event):
+        """Auto-focus on search box when popup opens"""
+        super().showEvent(event)
+        self.search_box.setFocus()
+        self.search_box.selectAll()
+    
     def set_items(self, items: List[str], selected: List[str], disabled: Set[str]):
         """Set items with selection and disabled state"""
         self._all_items = items
@@ -58,26 +64,39 @@ class MultiSelectPopup(QDialog):
         self._rebuild_list()
     
     def _rebuild_list(self):
-        """Rebuild list based on search filter"""
+        """Rebuild list based on search filter, with smart sorting"""
         search_text = self.search_box.text().lower()
         
         self.list_widget.blockSignals(True)
         self.list_widget.clear()
         
+        # Sort items: currently selected first, then unselected available, then disabled at bottom
+        available_items = []
         for item_text in self._all_items:
             # Filter by search
             if search_text and search_text not in item_text.lower():
                 continue
             
+            is_selected = item_text in self._selected
+            is_disabled = item_text in self._disabled_items
+            
+            # Sort order: selected (0), available (1), disabled (2)
+            sort_key = 0 if is_selected else (2 if is_disabled else 1)
+            available_items.append((sort_key, item_text, is_selected, is_disabled))
+        
+        # Sort by sort_key, then alphabetically
+        available_items.sort(key=lambda x: (x[0], x[1].lower()))
+        
+        for _, item_text, is_selected, is_disabled in available_items:
             item = QListWidgetItem(item_text)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             
-            if item_text in self._disabled_items:
+            if is_disabled:
                 item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
                 item.setCheckState(Qt.Unchecked)
                 item.setForeground(QBrush(QColor('#999999')))
             else:
-                if item_text in self._selected:
+                if is_selected:
                     item.setCheckState(Qt.Checked)
                 else:
                     item.setCheckState(Qt.Unchecked)
@@ -304,9 +323,13 @@ class FileSheetSelector(QGroupBox):
     def _add_files_from_list(self, files: List[str]):
         """Add files from a list of filepaths"""
         from utils.excel_handler import ExcelReader
+        from PyQt5.QtWidgets import QApplication
         
         added_count = 0
         for filepath in files:
+            # Keep UI responsive
+            QApplication.processEvents()
+            
             if filepath in self.files:
                 continue  # Skip duplicates
             
@@ -527,6 +550,9 @@ class ColumnListWidget(QGroupBox):
                     if self.columns[col_name]['type'] != 'Tax':
                         self.columns[col_name]['type'] = 'Tax'
                         
+                        # Save user override to preserve on rescan
+                        self._save_user_type_override(col_name, 'Tax')
+                        
                         # Update _all_column_data too
                         for col_data in self._all_column_data:
                             if col_data['name'] == col_name:
@@ -602,20 +628,40 @@ class ColumnListWidget(QGroupBox):
         for col_info in filtered:
             self._add_column_row(col_info)
     
-    def set_columns(self, column_data: List[Dict]):
+    def set_columns(self, column_data: List[Dict], preserve_user_types: bool = True):
         """
         Set columns with their data.
-        column_data: List of {'name': str, 'type': str, 'sum': float/None, 'is_numeric': bool}
+        column_data: List of {'name': str, 'type': str, 'sum': float/None, 'is_numeric': bool, 'sheets': list}
+        preserve_user_types: If True, preserve user's manual type changes
         """
+        # Save current user type overrides before clearing
+        if preserve_user_types and hasattr(self, '_user_type_overrides'):
+            # Keep existing overrides
+            pass
+        else:
+            self._user_type_overrides = {}
+        
         self.columns.clear()
         self._all_column_data = []
         
         for col_info in column_data:
             name = col_info['name']
+            
+            # Apply user override if exists
+            if name in self._user_type_overrides:
+                col_info = col_info.copy()  # Don't modify original
+                col_info['type'] = self._user_type_overrides[name]
+            
             self.columns[name] = col_info
             self._all_column_data.append(col_info)
         
         self._apply_filter()
+    
+    def _save_user_type_override(self, col_name: str, col_type: str):
+        """Save a user's manual type change"""
+        if not hasattr(self, '_user_type_overrides'):
+            self._user_type_overrides = {}
+        self._user_type_overrides[col_name] = col_type
     
     def _add_column_row(self, col_info: Dict):
         """Add a column row to the table"""
@@ -626,6 +672,7 @@ class ColumnListWidget(QGroupBox):
         col_type = col_info['type']
         col_sum = col_info.get('sum')
         is_numeric = col_info.get('is_numeric', False)
+        sheets = col_info.get('sheets', [])
         
         # Type prefix
         prefix_map = {'Tax': '[T]', 'Excluded': '[E]', 'Standard': '[S]', 'Taxable': '[ ]'}
@@ -634,6 +681,11 @@ class ColumnListWidget(QGroupBox):
         # Column name with prefix
         name_item = QTableWidgetItem(f"{prefix} {name}")
         name_item.setData(Qt.UserRole, name)
+        
+        # Add tooltip showing which sheets have this column
+        if sheets:
+            sheets_text = "\n".join(sheets)
+            name_item.setToolTip(f"Found in:\n{sheets_text}")
         
         # Type
         type_item = QTableWidgetItem(col_type)
@@ -677,6 +729,9 @@ class ColumnListWidget(QGroupBox):
                         continue
                     
                     self.columns[col_name]['type'] = mark_type
+                    
+                    # Save user override to preserve on rescan
+                    self._save_user_type_override(col_name, mark_type)
                     
                     # Update _all_column_data too
                     for col_data in self._all_column_data:
@@ -1088,20 +1143,24 @@ class SetupTab(QWidget):
     def _scan_columns(self):
         """Scan columns from all selected files/sheets"""
         from utils.excel_handler import ExcelReader
+        from PyQt5.QtWidgets import QApplication
         
         sources = self.file_selector.get_selected_sources()
         if not sources:
-            self.column_list.set_columns([])
+            self.column_list.set_columns([], preserve_user_types=True)
             self.tax_config.set_available_columns([])
             return
         
-        # Collect column data with sums
-        column_stats = {}  # col_name -> {'sum': float, 'count': int, 'is_numeric': bool}
+        # Collect column data with sums and sheet tracking
+        column_stats = {}  # col_name -> {'sum': float, 'count': int, 'sheets': set, ...}
         
         standard_cols = ['Date', 'Particulars', 'Voucher No.', 'Voucher Type', 'Type', 
                         'Vch No.', 'Ref No.', 'GSTIN', 'Party Name']
         
         for filepath, sheet_name in sources:
+            # Keep UI responsive
+            QApplication.processEvents()
+            
             try:
                 df = ExcelReader.read_sheet(filepath, sheet_name)
                 
@@ -1143,6 +1202,10 @@ class SetupTab(QWidget):
                 mask = data.apply(is_not_grand_total, axis=1)
                 data = data[mask]
                 
+                # Get short sheet identifier (filename | sheet)
+                short_filename = os.path.basename(filepath)
+                sheet_id = f"{short_filename} | {sheet_name}"
+                
                 # Collect stats for each column
                 for col in headers:
                     if col not in column_stats:
@@ -1150,8 +1213,12 @@ class SetupTab(QWidget):
                             'sum': 0, 
                             'count': 0, 
                             'numeric_count': 0,
-                            'total_non_null': 0
+                            'total_non_null': 0,
+                            'sheets': set()  # Track which sheets have this column
                         }
+                    
+                    # Add sheet to tracking
+                    column_stats[col]['sheets'].add(sheet_id)
                     
                     try:
                         numeric_values = pd.to_numeric(data[col], errors='coerce')
@@ -1224,15 +1291,19 @@ class SetupTab(QWidget):
             else:
                 col_type = 'Taxable'
             
+            # Format sheets list for display
+            sheets_list = sorted(list(stats.get('sheets', set())))
+            
             column_data.append({
                 'name': col_name,
                 'type': col_type,
                 'sum': stats['sum'] if stats['is_numeric'] else None,
-                'is_numeric': stats['is_numeric']
+                'is_numeric': stats['is_numeric'],
+                'sheets': sheets_list  # Track which sheets have this column
             })
         
         self._scanned_column_data = column_data
-        self.column_list.set_columns(column_data)
+        self.column_list.set_columns(column_data, preserve_user_types=True)
         
         # Update tax config with Tax-marked columns only
         self._update_tax_config_columns()
