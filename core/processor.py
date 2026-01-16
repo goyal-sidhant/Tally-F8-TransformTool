@@ -87,21 +87,30 @@ class TaxColumnMapper:
 
 class GSTProcessor:
     """Main processor for GST data transformation"""
-    
-    def __init__(self, tax_config: pd.DataFrame, exclusion_list: List[str], 
-                 tax_marked_columns: List[str] = None):
+
+    # Standard columns that should never be included in taxable value calculations
+    DEFAULT_STANDARD_COLUMNS = [
+        'Date', 'Particulars', 'Voucher No.', 'Voucher Type', 'Type',
+        'Vch No.', 'Ref No.', 'GSTIN', 'Party Name', 'GSTIN/UIN'
+    ]
+
+    def __init__(self, tax_config: pd.DataFrame, exclusion_list: List[str],
+                 tax_marked_columns: List[str] = None, standard_columns: List[str] = None):
         """
         Initialize GST Processor.
-        
+
         Args:
             tax_config: Tax configuration DataFrame
             exclusion_list: List of columns to exclude
             tax_marked_columns: List of columns marked as Tax in Column List
                                (used for exclusion even if not assigned in TaxConfig)
+            standard_columns: List of standard columns to exclude from taxable value
+                             (e.g., Date, Particulars, Voucher No.)
         """
         self.tax_config = tax_config
         self.exclusion_list = exclusion_list
         self.tax_marked_columns = tax_marked_columns or []
+        self.standard_columns = standard_columns if standard_columns is not None else self.DEFAULT_STANDARD_COLUMNS
         self.tax_mapper = TaxColumnMapper(tax_config)
         self.warnings = []
     
@@ -208,37 +217,39 @@ class GSTProcessor:
                     return True
         return False
     
-    def calculate_taxable_value(self, row: pd.Series, all_columns: List[str], 
+    def calculate_taxable_value(self, row: pd.Series, all_columns: List[str],
                                  tax_columns: List[str]) -> float:
-        """Calculate taxable value (sum of non-excluded, non-tax numeric columns)"""
-        # Exclude: exclusion_list + TaxConfig columns + Tax-marked columns
-        columns_to_exclude = set(self.exclusion_list) | set(tax_columns) | set(self.tax_marked_columns)
-        
+        """Calculate taxable value (sum of non-excluded, non-tax, non-standard numeric columns)"""
+        # Exclude: exclusion_list + TaxConfig columns + Tax-marked columns + Standard columns
+        columns_to_exclude = (set(self.exclusion_list) | set(tax_columns) |
+                              set(self.tax_marked_columns) | set(self.standard_columns))
+
         total = 0.0
         for col in all_columns:
             if col not in columns_to_exclude:
                 val = row.get(col, 0)
                 if isinstance(val, (int, float)) and pd.notna(val):
                     total += val
-        
+
         return total
     
-    def get_active_columns(self, row: pd.Series, all_columns: List[str], 
+    def get_active_columns(self, row: pd.Series, all_columns: List[str],
                            tax_columns: List[str]) -> str:
         """Get active columns with their values, sorted by amount descending"""
-        # Exclude: exclusion_list + TaxConfig columns + Tax-marked columns
-        columns_to_exclude = set(self.exclusion_list) | set(tax_columns) | set(self.tax_marked_columns)
-        
+        # Exclude: exclusion_list + TaxConfig columns + Tax-marked columns + Standard columns
+        columns_to_exclude = (set(self.exclusion_list) | set(tax_columns) |
+                              set(self.tax_marked_columns) | set(self.standard_columns))
+
         active = []
         for col in all_columns:
             if col not in columns_to_exclude:
                 val = row.get(col, 0)
                 if isinstance(val, (int, float)) and pd.notna(val) and val != 0:
                     active.append((col, val))
-        
+
         # Sort by value descending
         active.sort(key=lambda x: abs(x[1]), reverse=True)
-        
+
         # Format as "Column: Amount | Column: Amount"
         formatted = [f"{col}: {val:,.2f}" for col, val in active]
         return " | ".join(formatted)

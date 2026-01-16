@@ -108,6 +108,11 @@ class ExcelWriter:
     TAXABLE_COL_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # Light green for Taxable
     EXCLUDE_COL_FILL = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")  # Light yellow for Excluded
     STANDARD_COL_FILL = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")  # Light sage for Standard
+    # Data sheet color coding (matching app colors)
+    CGST_SGST_FILL = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")  # Light green for CGST/SGST
+    IGST_FILL = PatternFill(start_color="DDEBF7", end_color="DDEBF7", fill_type="solid")  # Light blue for IGST
+    TOTAL_FILL = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")  # Light orange for Totals
+    TAXABLE_DATA_FILL = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")  # Light green for taxable data
     BORDER = Border(
         left=Side(style='thin', color='B4B4B4'),
         right=Side(style='thin', color='B4B4B4'),
@@ -154,11 +159,11 @@ class ExcelWriter:
         
         # Sheet 3: GST Transactions (as Excel Table with index)
         ws_gst = wb.create_sheet("GST Transactions")
-        ExcelWriter._write_data_sheet_as_table(ws_gst, gst_data, "GST", "GSTTable")
-        
+        ExcelWriter._write_data_sheet_as_table(ws_gst, gst_data, "GST", "GSTTable", column_types)
+
         # Sheet 4: Non-GST Transactions (as Excel Table with index)
         ws_non_gst = wb.create_sheet("Non-GST Transactions")
-        ExcelWriter._write_data_sheet_as_table(ws_non_gst, non_gst_data, "Non-GST", "NonGSTTable")
+        ExcelWriter._write_data_sheet_as_table(ws_non_gst, non_gst_data, "Non-GST", "NonGSTTable", column_types)
         
         # Save
         wb.save(filepath)
@@ -187,14 +192,14 @@ class ExcelWriter:
         # Source files table
         ws['A8'] = "Source Files Summary"
         ws['A8'].font = Font(bold=True, size=12)
-        
-        headers = ['Source File', 'Sheet', 'Original Rows', 'GST Rows', 'Non-GST Rows', 'Status']
+
+        headers = ['Source File', 'Sheet', 'Original Rows', 'Data Rows', 'GST Rows', 'Non-GST Rows', 'Status']
         for col, header in enumerate(headers, 1):
             cell = ws.cell(row=9, column=col, value=header)
             cell.fill = ExcelWriter.HEADER_FILL
             cell.font = ExcelWriter.HEADER_FONT
             cell.border = ExcelWriter.BORDER
-        
+
         row = 10
         sources = metadata.get('sources', [])
         for source in sources:
@@ -202,24 +207,29 @@ class ExcelWriter:
             parts = source_name.split(' | ')
             file_name = parts[0] if parts else source_name
             sheet_name = parts[1] if len(parts) > 1 else ''
-            
+
             ws.cell(row=row, column=1, value=file_name).border = ExcelWriter.BORDER
             ws.cell(row=row, column=2, value=sheet_name).border = ExcelWriter.BORDER
             ws.cell(row=row, column=3, value=source.get('original_rows', 0)).border = ExcelWriter.BORDER
-            ws.cell(row=row, column=4, value=source.get('gst_rows', 0)).border = ExcelWriter.BORDER
-            ws.cell(row=row, column=5, value=source.get('non_gst_rows', 0)).border = ExcelWriter.BORDER
-            
+            # Data Rows = rows after cleaning (header/grand total removed)
+            data_rows = source.get('rows_after_cleaning', source.get('gst_rows', 0) + source.get('non_gst_rows', 0))
+            ws.cell(row=row, column=4, value=data_rows).border = ExcelWriter.BORDER
+            ws.cell(row=row, column=5, value=source.get('gst_rows', 0)).border = ExcelWriter.BORDER
+            ws.cell(row=row, column=6, value=source.get('non_gst_rows', 0)).border = ExcelWriter.BORDER
+
             error = source.get('error')
             status = 'Error: ' + error if error else 'Success'
-            ws.cell(row=row, column=6, value=status).border = ExcelWriter.BORDER
-            
+            ws.cell(row=row, column=7, value=status).border = ExcelWriter.BORDER
+
             row += 1
-        
+
         # Totals row
         ws.cell(row=row, column=1, value="TOTAL").font = Font(bold=True)
         ws.cell(row=row, column=3, value=sum(s.get('original_rows', 0) for s in sources)).font = Font(bold=True)
-        ws.cell(row=row, column=4, value=metadata.get('total_gst_rows', 0)).font = Font(bold=True)
-        ws.cell(row=row, column=5, value=metadata.get('total_non_gst_rows', 0)).font = Font(bold=True)
+        total_data_rows = sum(s.get('rows_after_cleaning', s.get('gst_rows', 0) + s.get('non_gst_rows', 0)) for s in sources)
+        ws.cell(row=row, column=4, value=total_data_rows).font = Font(bold=True)
+        ws.cell(row=row, column=5, value=metadata.get('total_gst_rows', 0)).font = Font(bold=True)
+        ws.cell(row=row, column=6, value=metadata.get('total_non_gst_rows', 0)).font = Font(bold=True)
         
         # Column Configuration table with Index, Type, Sum
         row += 3
@@ -286,9 +296,10 @@ class ExcelWriter:
         ws.column_dimensions['A'].width = 8
         ws.column_dimensions['B'].width = 35
         ws.column_dimensions['C'].width = 15
-        ws.column_dimensions['D'].width = 18
-        ws.column_dimensions['E'].width = 15
-        ws.column_dimensions['F'].width = 20
+        ws.column_dimensions['D'].width = 15
+        ws.column_dimensions['E'].width = 12
+        ws.column_dimensions['F'].width = 15
+        ws.column_dimensions['G'].width = 20
     
     @staticmethod
     def _write_config_sheet(ws, tax_config: List[Dict], exclusion_list: List[str]):
@@ -330,16 +341,32 @@ class ExcelWriter:
         ws.column_dimensions['F'].width = 20
     
     @staticmethod
-    def _write_data_sheet_as_table(ws, df: pd.DataFrame, sheet_type: str, table_name: str):
-        """Write data sheet as Excel Table (Ctrl+T style) with index column and highlighted computed columns"""
+    def _write_data_sheet_as_table(ws, df: pd.DataFrame, sheet_type: str, table_name: str,
+                                    column_types: Dict[str, str] = None):
+        """Write data sheet as Excel Table (Ctrl+T style) with index column and highlighted columns"""
         from openpyxl.worksheet.table import Table, TableStyleInfo
-        
+
         if df is None or len(df) == 0:
             ws['A1'] = f"No {sheet_type} transactions found"
             return
         
         # Add index column to dataframe (avoid collision with existing '#' column)
         df_with_index = df.copy()
+
+        # Deduplicate column names to prevent Excel table corruption
+        cols = df_with_index.columns.tolist()
+        seen = {}
+        new_cols = []
+        for col in cols:
+            col_str = str(col) if col is not None else 'Column'
+            if col_str in seen:
+                seen[col_str] += 1
+                new_cols.append(f"{col_str}_{seen[col_str]}")
+            else:
+                seen[col_str] = 0
+                new_cols.append(col_str)
+        df_with_index.columns = new_cols
+
         index_col_name = '#'
         if index_col_name in df_with_index.columns:
             # Find a unique name for index column
@@ -349,30 +376,36 @@ class ExcelWriter:
             index_col_name = f'#{counter}'
         df_with_index.insert(0, index_col_name, range(1, len(df) + 1))
         
-        # Define computed/derived columns to highlight with light green
+        # Define computed/derived columns
         computed_columns = {
             'Active Columns', 'Taxable Value', 'Tax Rates (Config)', 'Tax Rates (Calculated)',
-            'Total CGST', 'Total SGST', 'Total IGST', 'Transaction Type', 'Review Required', 'Source'
+            'Transaction Type', 'Review Required', 'Source'
         }
-        
-        # Also highlight transformed tax columns (CGST_X%, SGST_X%, IGST_X%)
-        def is_computed_column(col_name):
-            if col_name in computed_columns:
-                return True
-            if col_name.startswith(('CGST_', 'SGST_', 'IGST_')):
-                return True
-            if col_name == 'CESS':
-                return True
-            return False
-        
-        # Light green fill for computed columns
-        computed_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-        
-        # Track which columns are computed (by index)
-        computed_col_indices = set()
+
+        # Determine fill color for each column based on type
+        def get_column_fill(col_name):
+            """Get the appropriate fill color for a column based on its type"""
+            if col_name.startswith(('CGST_', 'SGST_')):
+                return ExcelWriter.CGST_SGST_FILL  # Light green
+            elif col_name.startswith('IGST_'):
+                return ExcelWriter.IGST_FILL  # Light blue
+            elif col_name.startswith('Total '):
+                return ExcelWriter.TOTAL_FILL  # Light orange
+            elif col_name == 'CESS':
+                return ExcelWriter.CGST_SGST_FILL  # Light green (same as CGST/SGST)
+            elif col_name in computed_columns:
+                return ExcelWriter.TAXABLE_COL_FILL  # Light green for other computed
+            # Highlight Taxable data columns (raw data used in taxable value calculation)
+            elif column_types and col_name in column_types and column_types[col_name] == 'Taxable':
+                return ExcelWriter.TAXABLE_DATA_FILL  # Light green for taxable data
+            return None
+
+        # Track column fills by index
+        column_fills = {}
         for col_idx, col_name in enumerate(df_with_index.columns, 1):
-            if is_computed_column(col_name):
-                computed_col_indices.add(col_idx)
+            fill = get_column_fill(col_name)
+            if fill:
+                column_fills[col_idx] = fill
         
         # Write headers
         for col_idx, col_name in enumerate(df_with_index.columns, 1):
@@ -383,17 +416,17 @@ class ExcelWriter:
         for row_idx, row in enumerate(df_with_index.itertuples(index=False), 2):
             for col_idx, value in enumerate(row, 1):
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
-                
+
                 # Format numbers
                 if isinstance(value, (int, float)) and not pd.isna(value):
                     if col_idx == 1:  # Index column - no decimals
                         cell.number_format = '#,##0'
                     else:
                         cell.number_format = '#,##0.00'
-                
-                # Highlight computed columns with light green
-                if col_idx in computed_col_indices:
-                    cell.fill = computed_fill
+
+                # Apply column-specific fill color
+                if col_idx in column_fills:
+                    cell.fill = column_fills[col_idx]
         
         # Auto-adjust column widths
         for col_idx, col_name in enumerate(df_with_index.columns, 1):

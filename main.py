@@ -421,9 +421,13 @@ class MainWindow(QMainWindow):
             # Get tax-marked columns
             tax_marked_columns = self.columns_tab.get_tax_columns()
 
+            # Standard columns to exclude from taxable value calculation
+            standard_columns = ['Date', 'Particulars', 'Voucher No.', 'Voucher Type', 'Type',
+                                'Vch No.', 'Ref No.', 'GSTIN', 'Party Name', 'GSTIN/UIN']
+
             # Create processor
             tax_config_df = self.config_manager.get_tax_config_df()
-            processor = GSTProcessor(tax_config_df, exclusion_list, tax_marked_columns)
+            processor = GSTProcessor(tax_config_df, exclusion_list, tax_marked_columns, standard_columns)
 
             # Process data
             progress.setValue(40)
