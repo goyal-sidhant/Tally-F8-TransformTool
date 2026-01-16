@@ -2,6 +2,17 @@
 
 A PyQt5 Windows application for transforming Tally ERP GST data exports into structured formats suitable for GST compliance and ITC analysis in India.
 
+## What's New in v2.5
+
+- **Tab Navigation**: Previous/Next buttons on all tabs for easy workflow
+- **Folder Import**: Add entire folder with recursive scanning and preview dialog
+- **Export Complete Report**: Available from GST and Non-GST tabs
+- **Post-Export Options**: Open File or Open Folder after export
+- **Excel Table Conversion**: Data sheets converted to Excel Tables with clean style
+- **Date Formatting**: Dates display without time component
+- **Bug Fixes**: Fixed tax column exclusion with whitespace-tolerant matching
+- **Voucher No. Fix**: Standard columns properly excluded from taxable value
+
 ## What's New in v2.0
 
 - **Redesigned UI**: Separate tabs for Files, Columns, and Tax Config
@@ -163,29 +174,43 @@ gst_tool/
 
 ## Roadmap
 
-### Version 2.0 (Current)
-- [x] UI Restructuring: 3 separate tabs for Files, Columns, Tax Config
-- [x] Improved Files Tab: Visual tree with row counts, sheet tooltips
-- [x] Columns Tab: Side-by-side Column List + Exclusion List
-- [x] Tax Config Tab: Simplified view showing only Tax-marked columns
-- [x] Auto-assign tax columns by name detection
+### Version 2.5 (Current)
+- [x] Tab navigation with Previous/Next buttons
+- [x] Folder import with recursive scanning
+- [x] Export Complete Report from GST/Non-GST tabs
+- [x] Post-export Open File/Folder options
+- [x] Excel Table conversion with clean style
+- [x] Date formatting (no time component)
+- [x] Fixed tax column exclusion (whitespace-tolerant)
+- [x] Fixed Voucher No. in taxable value bug
 
-### Version 2.1 (Planned)
+### Version 2.6 (Planned)
+- [ ] Tab status indicators (ready/needs attention)
+- [ ] Button state management (disable when no data)
+- [ ] Search/filter in GST/Non-GST tables
 - [ ] Data preview before processing
-- [ ] Progress feedback during file scan
-- [ ] Undo/Redo for column markings
 
-### Version 2.2 (Future)
+### Version 3.0 (Future)
 - [ ] Batch export (multiple files → multiple outputs)
 - [ ] GSTR-1/3B JSON generation
 - [ ] Summary dashboard with pivot analysis
-
-### Version 3.0 (Long-term)
 - [ ] GSTR-2A/2B reconciliation
-- [ ] Direct GST portal integration
-- [ ] Multi-company consolidated processing
 
 ## Version History
+
+- **v2.5** (January 2025): UX Enhancements & Bug Fixes
+  - Tab navigation with Previous/Next buttons
+  - Folder import with preview dialog
+  - Export Complete Report from result tabs
+  - Post-export Open File/Folder options
+  - Excel Table conversion
+  - Fixed tax column matching (whitespace/case tolerant)
+  - Fixed Voucher No. appearing in taxable value
+
+- **v2.1** (January 2025): Bug Fixes
+  - Fixed 37 bugs: crash prevention and robustness improvements
+  - Fixed Excel file corruption issues
+  - Added Data Rows column in metadata
 
 - **v2.0** (January 2025): UI Redesign
   - Separate tabs for Files, Columns, Tax Config

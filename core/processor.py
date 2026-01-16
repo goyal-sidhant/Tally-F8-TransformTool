@@ -112,6 +112,11 @@ class GSTProcessor:
         self.tax_marked_columns = tax_marked_columns or []
         self.standard_columns = standard_columns if standard_columns is not None else self.DEFAULT_STANDARD_COLUMNS
         self.tax_mapper = TaxColumnMapper(tax_config)
+
+    @staticmethod
+    def normalize_column_name(name: str) -> str:
+        """Normalize column name for comparison (collapse whitespace, lowercase)"""
+        return ' '.join(str(name).lower().split())
         self.warnings = []
     
     def find_header_row(self, df: pd.DataFrame) -> int:
@@ -210,8 +215,12 @@ class GSTProcessor:
         # Remove excluded columns from the check
         all_tax_cols = all_tax_cols - set(self.exclusion_list)
 
-        for col in all_tax_cols:
-            if col in row.index:
+        # Normalize tax column names for matching
+        all_tax_cols_normalized = {self.normalize_column_name(c): c for c in all_tax_cols}
+
+        for col in row.index:
+            col_normalized = self.normalize_column_name(col)
+            if col_normalized in all_tax_cols_normalized:
                 val = row.get(col, 0)
                 if pd.notna(val) and val != 0:
                     return True
@@ -224,9 +233,13 @@ class GSTProcessor:
         columns_to_exclude = (set(self.exclusion_list) | set(tax_columns) |
                               set(self.tax_marked_columns) | set(self.standard_columns))
 
+        # Normalize exclusion set for comparison (handles whitespace/case differences)
+        columns_to_exclude_normalized = {self.normalize_column_name(c) for c in columns_to_exclude}
+
         total = 0.0
         for col in all_columns:
-            if col not in columns_to_exclude:
+            # Use normalized comparison
+            if self.normalize_column_name(col) not in columns_to_exclude_normalized:
                 val = row.get(col, 0)
                 if isinstance(val, (int, float)) and pd.notna(val):
                     total += val
@@ -240,9 +253,13 @@ class GSTProcessor:
         columns_to_exclude = (set(self.exclusion_list) | set(tax_columns) |
                               set(self.tax_marked_columns) | set(self.standard_columns))
 
+        # Normalize exclusion set for comparison (handles whitespace/case differences)
+        columns_to_exclude_normalized = {self.normalize_column_name(c) for c in columns_to_exclude}
+
         active = []
         for col in all_columns:
-            if col not in columns_to_exclude:
+            # Use normalized comparison
+            if self.normalize_column_name(col) not in columns_to_exclude_normalized:
                 val = row.get(col, 0)
                 if isinstance(val, (int, float)) and pd.notna(val) and val != 0:
                     active.append((col, val))

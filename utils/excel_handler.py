@@ -453,28 +453,31 @@ class ExcelWriter:
             cell.border = ExcelWriter.BORDER
             cell.alignment = Alignment(horizontal='center', vertical='center')
 
-        # Alternating row colors
-        alt_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+        # Get column names for date detection
+        col_names = df_with_index.columns.tolist()
 
         # Write data with highlighting
         for row_idx, row in enumerate(df_with_index.itertuples(index=False), 2):
-            is_alt_row = (row_idx % 2 == 0)
             for col_idx, value in enumerate(row, 1):
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
                 cell.border = ExcelWriter.BORDER
 
+                # Get column name for this cell
+                col_name = col_names[col_idx - 1] if col_idx <= len(col_names) else ''
+
+                # Format dates - show only date, no time
+                if isinstance(value, datetime) or (col_name.lower() == 'date' and value is not None):
+                    cell.number_format = 'DD-MM-YYYY'
                 # Format numbers
-                if isinstance(value, (int, float)) and not pd.isna(value):
+                elif isinstance(value, (int, float)) and not pd.isna(value):
                     if col_idx == 1:  # Index column - no decimals
                         cell.number_format = '#,##0'
                     else:
                         cell.number_format = '#,##0.00'
 
-                # Apply column-specific fill color (priority)
+                # Apply column-specific fill color
                 if col_idx in column_fills:
                     cell.fill = column_fills[col_idx]
-                elif is_alt_row:
-                    cell.fill = alt_fill
 
         # Auto-adjust column widths
         for col_idx, col_name in enumerate(df_with_index.columns, 1):
@@ -489,6 +492,39 @@ class ExcelWriter:
 
         # Freeze header row for easier navigation
         ws.freeze_panes = 'A2'
+
+    @staticmethod
+    def convert_sheets_to_tables(filepath: str):
+        """
+        Reopen saved file and convert GST/Non-GST sheets to Excel Tables with no style.
+        This is done as a separate step after initial save to avoid corruption issues.
+        """
+        from openpyxl.worksheet.table import Table, TableStyleInfo
+
+        wb = load_workbook(filepath)
+
+        for sheet_name in ['GST Transactions', 'Non-GST Transactions']:
+            if sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                if ws.max_row > 1:  # Has data (more than just header)
+                    # Create unique table name (no spaces, no hyphens)
+                    table_name = sheet_name.replace(' ', '').replace('-', '')
+                    last_col = get_column_letter(ws.max_column)
+                    table_ref = f"A1:{last_col}{ws.max_row}"
+
+                    # Create table with no visible style
+                    table = Table(displayName=table_name, ref=table_ref)
+                    style = TableStyleInfo(
+                        name="TableStyleLight1",
+                        showFirstColumn=False,
+                        showLastColumn=False,
+                        showRowStripes=False,
+                        showColumnStripes=False
+                    )
+                    table.tableStyleInfo = style
+                    ws.add_table(table)
+
+        wb.save(filepath)
 
 
 class ExcelExporter:

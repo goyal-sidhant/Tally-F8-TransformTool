@@ -6,7 +6,7 @@ A PyQt5 Windows application for transforming Tally ERP GST data exports
 into structured formats suitable for GST compliance and ITC analysis.
 
 Author: Sidhant
-Version: 2.0
+Version: 2.5
 """
 
 import sys
@@ -74,7 +74,7 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         """Initialize the user interface"""
-        self.setWindowTitle("GST Compliance Tool - Tally F8 Transformer v2.0")
+        self.setWindowTitle("GST Compliance Tool - Tally F8 Transformer v2.5")
         self.setMinimumSize(1200, 800)
 
         # Central widget with tabs
@@ -543,10 +543,26 @@ class MainWindow(QMainWindow):
                 column_stats=column_stats
             )
 
-            QMessageBox.information(
-                self, "Success",
-                f"Report exported successfully to:\n{filepath}"
-            )
+            # Convert data sheets to Excel Tables (done separately to avoid corruption)
+            ExcelWriter.convert_sheets_to_tables(filepath)
+
+            # Show success dialog with options
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Export Complete")
+            msg.setText(f"Report exported successfully to:\n{filepath}")
+            msg.setIcon(QMessageBox.Information)
+
+            open_file_btn = msg.addButton("Open File", QMessageBox.ActionRole)
+            open_folder_btn = msg.addButton("Open Folder", QMessageBox.ActionRole)
+            msg.addButton(QMessageBox.Ok)
+
+            msg.exec_()
+
+            clicked = msg.clickedButton()
+            if clicked == open_file_btn:
+                os.startfile(filepath)
+            elif clicked == open_folder_btn:
+                os.startfile(os.path.dirname(filepath))
 
         except Exception as e:
             QMessageBox.critical(
