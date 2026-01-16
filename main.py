@@ -387,6 +387,13 @@ class MainWindow(QMainWindow):
 
                 try:
                     df = ExcelReader.read_sheet(filepath, sheet_name)
+                    # Validate that the DataFrame has data
+                    if df is None or len(df) == 0:
+                        QMessageBox.warning(
+                            self, "Warning",
+                            f"Sheet '{sheet_name}' in {filepath} is empty. Skipping."
+                        )
+                        continue
                     source_name = get_source_name(filepath, sheet_name)
                     loaded_sources.append((df, source_name))
                 except Exception as e:

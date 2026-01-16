@@ -30,8 +30,12 @@ class ExcelReader:
         try:
             xl = pd.ExcelFile(filepath)
             return xl.sheet_names
+        except PermissionError:
+            raise ValueError(f"Permission denied: Cannot access '{filepath}'. The file may be open in another program.")
+        except FileNotFoundError:
+            raise ValueError(f"File not found: '{filepath}'")
         except Exception as e:
-            raise ValueError(f"Error reading file: {str(e)}")
+            raise ValueError(f"Error reading file '{filepath}': {str(e)}")
     
     @staticmethod
     def read_sheet(filepath: str, sheet_name: str) -> pd.DataFrame:
@@ -40,19 +44,29 @@ class ExcelReader:
             # Read without headers (we'll detect them later)
             df = pd.read_excel(filepath, sheet_name=sheet_name, header=None)
             return df
+        except PermissionError:
+            raise ValueError(f"Permission denied: Cannot access '{filepath}'. The file may be open in another program.")
+        except FileNotFoundError:
+            raise ValueError(f"File not found: '{filepath}'")
         except Exception as e:
-            raise ValueError(f"Error reading sheet '{sheet_name}': {str(e)}")
+            raise ValueError(f"Error reading sheet '{sheet_name}' from '{filepath}': {str(e)}")
     
     @staticmethod
     def read_multiple_sheets(filepath: str, sheet_names: List[str]) -> Dict[str, pd.DataFrame]:
         """Read multiple sheets from Excel file"""
         result = {}
+        errors = []
         for sheet_name in sheet_names:
             try:
                 df = ExcelReader.read_sheet(filepath, sheet_name)
                 result[sheet_name] = df
             except Exception as e:
                 result[sheet_name] = None
+                errors.append(f"Sheet '{sheet_name}': {str(e)}")
+        # Log errors if any sheets failed (callers can check for None values)
+        if errors:
+            import logging
+            logging.warning(f"Failed to read sheets from {filepath}: {'; '.join(errors)}")
         return result
     
     @staticmethod
@@ -324,9 +338,16 @@ class ExcelWriter:
             ws['A1'] = f"No {sheet_type} transactions found"
             return
         
-        # Add index column to dataframe
+        # Add index column to dataframe (avoid collision with existing '#' column)
         df_with_index = df.copy()
-        df_with_index.insert(0, '#', range(1, len(df) + 1))
+        index_col_name = '#'
+        if index_col_name in df_with_index.columns:
+            # Find a unique name for index column
+            counter = 1
+            while f'{index_col_name}{counter}' in df_with_index.columns:
+                counter += 1
+            index_col_name = f'#{counter}'
+        df_with_index.insert(0, index_col_name, range(1, len(df) + 1))
         
         # Define computed/derived columns to highlight with light green
         computed_columns = {

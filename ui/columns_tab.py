@@ -383,10 +383,12 @@ class ColumnsTab(QWidget):
         self._apply_filter()
 
     def _add_to_exclusion_list(self, col_name: str):
-        """Add column to exclusion list widget"""
+        """Add column to exclusion list widget (case-insensitive duplicate check)"""
         items = [self.exclusion_list.item(i).text()
                  for i in range(self.exclusion_list.count())]
-        if col_name not in items:
+        # Case-insensitive check to avoid duplicates like "Discount" and "discount"
+        items_lower = [item.lower() for item in items]
+        if col_name.lower() not in items_lower:
             self.exclusion_list.addItem(col_name)
 
     def _remove_from_exclusion_list(self, col_name: str):
@@ -397,12 +399,13 @@ class ColumnsTab(QWidget):
                 break
 
     def _add_exclusion(self):
-        """Add item to exclusion list"""
+        """Add item to exclusion list (case-insensitive duplicate check)"""
         text = self.txt_add_excl.text().strip()
         if text:
             items = [self.exclusion_list.item(i).text()
                      for i in range(self.exclusion_list.count())]
-            if text not in items:
+            items_lower = [item.lower() for item in items]
+            if text.lower() not in items_lower:
                 self.exclusion_list.addItem(text)
                 self.txt_add_excl.clear()
 
@@ -479,6 +482,19 @@ class ColumnsTab(QWidget):
         return self._all_column_data
 
     def add_column(self, col_name: str, col_type: str = 'Excluded'):
-        """Add a column to exclusion list"""
+        """Add a column with specified type"""
         if col_type == 'Excluded':
             self._add_to_exclusion_list(col_name)
+        elif col_type == 'Tax':
+            # Mark as Tax in internal tracking
+            if col_name in self.columns:
+                self.columns[col_name]['type'] = 'Tax'
+                self._user_type_overrides[col_name] = 'Tax'
+                self.column_marked.emit(col_name, 'Tax')
+        elif col_type == 'Taxable':
+            # Mark as Taxable (clear exclusion)
+            if col_name in self.columns:
+                self.columns[col_name]['type'] = 'Taxable'
+                self._user_type_overrides[col_name] = 'Taxable'
+                self._remove_from_exclusion_list(col_name)
+                self.column_marked.emit(col_name, 'Taxable')

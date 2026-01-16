@@ -107,24 +107,29 @@ class GSTProcessor:
     
     def find_header_row(self, df: pd.DataFrame) -> int:
         """
-        Find the header row containing 'Date' and 'Particulars' in first 3 columns.
+        Find the header row containing 'Date' and 'Particulars'.
+        Checks first 5 columns (not just 3) and uses case-insensitive matching.
         Returns row index or raises error if not found.
         """
         for idx in range(min(20, len(df))):  # Check first 20 rows max
             row = df.iloc[idx]
-            first_three = [str(val).strip() if pd.notna(val) else '' for val in row.iloc[:3]]
-            
-            if 'Date' in first_three and 'Particulars' in first_three:
+            # Check first 5 columns instead of 3, use case-insensitive matching
+            first_five = [str(val).strip().lower() if pd.notna(val) else '' for val in row.iloc[:5]]
+
+            if 'date' in first_five and 'particulars' in first_five:
                 return idx
-        
-        raise ValueError("Header row with 'Date' and 'Particulars' not found in first 3 columns")
+
+        raise ValueError("Header row with 'Date' and 'Particulars' not found in first 5 columns")
     
     def clean_data(self, df: pd.DataFrame, header_row_idx: int) -> pd.DataFrame:
         """Clean data: set headers and remove grand total rows"""
         # Set headers from the header row
         new_headers = df.iloc[header_row_idx].tolist()
-        new_headers = [str(h).strip() if pd.notna(h) else f'Column_{i}' 
-                       for i, h in enumerate(new_headers)]
+        # Normalize column names: strip whitespace and collapse multiple spaces
+        new_headers = [
+            ' '.join(str(h).split()) if pd.notna(h) else f'Column_{i}'
+            for i, h in enumerate(new_headers)
+        ]
         
         # Get data rows (after header)
         data = df.iloc[header_row_idx + 1:].copy()
@@ -177,15 +182,25 @@ class GSTProcessor:
         
         for col in columns_to_convert:
             if col in df.columns:
+                original_values = df[col].copy()
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                # Track columns with significant conversion issues (more than 20% converted to 0)
+                non_null_count = original_values.notna().sum()
+                if non_null_count > 0:
+                    converted_to_zero = (original_values.notna() & (df[col] == 0) & (original_values != 0)).sum()
+                    if converted_to_zero / non_null_count > 0.2:
+                        self.warnings.append(f"Column '{col}': {converted_to_zero} values converted to 0 during numeric conversion")
         
         return df
     
     def has_gst(self, row: pd.Series, existing_tax_cols: List[str]) -> bool:
         """Check if row has any GST values in tax columns"""
         # Check both TaxConfig-assigned columns AND tax-marked columns
+        # But exclude columns that are in the exclusion list
         all_tax_cols = set(existing_tax_cols) | set(self.tax_marked_columns)
-        
+        # Remove excluded columns from the check
+        all_tax_cols = all_tax_cols - set(self.exclusion_list)
+
         for col in all_tax_cols:
             if col in row.index:
                 val = row.get(col, 0)
@@ -249,7 +264,10 @@ class GSTProcessor:
         for mapped_name, actual_cols in mapped_groups.items():
             existing_cols = [c for c in actual_cols if c in df.columns]
             if existing_cols:
-                df[mapped_name] = df[existing_cols].sum(axis=1)
+                # Use skipna=True explicitly and handle all-NaN rows properly
+                df[mapped_name] = df[existing_cols].apply(
+                    lambda row: row.sum(skipna=True) if row.notna().any() else 0, axis=1
+                )
         
         # Keep original tax columns for auditing (don't remove them)
         # They will remain in their original position for data verification
@@ -321,7 +339,11 @@ class GSTProcessor:
                 except ValueError:
                     processed_rates.append((rate, 0))
             elif types['IGST']:
-                processed_rates.append((rate, float(rate.replace('%', '')) if '%' in rate else 0))
+                try:
+                    rate_val = float(rate.replace('%', '')) if '%' in rate else 0
+                except (ValueError, TypeError):
+                    rate_val = 0
+                processed_rates.append((rate, rate_val))
         
         # Sort by numeric value (Generic last)
         processed_rates.sort(key=lambda x: x[1] if x[1] != float('inf') else 9999)
@@ -339,14 +361,25 @@ class GSTProcessor:
         total_cgst = row.get('Total CGST', 0)
         total_sgst = row.get('Total SGST', 0)
         total_igst = row.get('Total IGST', 0)
-        
+
+        # Handle NaN values in tax totals - convert to 0
+        if pd.isna(total_cgst):
+            total_cgst = 0
+        if pd.isna(total_sgst):
+            total_sgst = 0
+        if pd.isna(total_igst):
+            total_igst = 0
+
         total_tax = total_cgst + total_sgst + total_igst
-        
+
         if taxable_value == 0 or pd.isna(taxable_value):
             return 'N/A'
-        
-        rate = (total_tax / taxable_value) * 100
-        return f"{round(rate, 2)}%"
+
+        try:
+            rate = (total_tax / taxable_value) * 100
+            return f"{round(rate, 2)}%"
+        except (ZeroDivisionError, TypeError, ValueError):
+            return 'N/A'
     
     def get_transaction_type(self, row: pd.Series) -> str:
         """Get transaction type from Voucher Type or Type column"""
@@ -402,7 +435,10 @@ class GSTProcessor:
             match = re.search(r'(\d+\.?\d*)%', col_name)
             if match:
                 return float(match.group(1))
-            return float('inf')
+            # For Generic or non-numeric rates, use a high value to sort last
+            if 'generic' in col_name.lower():
+                return 9999.0
+            return 9998.0  # Other non-standard rates before Generic
         
         igst_cols.sort(key=extract_rate)
         cgst_cols.sort(key=extract_rate)
@@ -419,7 +455,8 @@ class GSTProcessor:
             final_order.append('Review Required')
         
         # Remove empty strings and non-existent columns
-        final_order = [c for c in final_order if c and c in all_columns or c == '']
+        # Note: Keep empty strings for spacing, and keep columns that exist in all_columns
+        final_order = [c for c in final_order if c == '' or (c and c in all_columns)]
         
         return final_order
     
@@ -434,7 +471,14 @@ class GSTProcessor:
         
         if len(df) == 0:
             self.warnings.append(f"{source_name}: No data rows after cleaning")
-            return pd.DataFrame(), pd.DataFrame(), metadata
+            # Return empty DataFrames with expected column structure
+            empty_cols = ['Source', 'Active Columns', 'Taxable Value', 'Tax Rates (Config)',
+                         'Tax Rates (Calculated)', 'Total CGST', 'Total SGST', 'Total IGST',
+                         'Transaction Type']
+            empty_df = pd.DataFrame(columns=empty_cols)
+            empty_non_gst = empty_df.copy()
+            empty_non_gst['Review Required'] = pd.Series(dtype=str)
+            return empty_df, empty_non_gst, metadata
         
         # Convert currency columns
         df = self.convert_currency_columns(df)
@@ -486,8 +530,10 @@ class GSTProcessor:
         
         # Add tax totals - CRITICAL: preserve index to avoid misalignment
         totals = df.apply(lambda row: self.calculate_tax_totals(row), axis=1, result_type='expand')
+        # Explicitly align by index to prevent misalignment issues
+        totals.index = df.index
         for col in totals.columns:
-            df[col] = totals[col]
+            df.loc[:, col] = totals[col].values
         
         # Add Tax Rates (Calculated)
         df['Tax Rates (Calculated)'] = df.apply(lambda row: self.calculate_rate_from_values(row), axis=1)
@@ -557,7 +603,15 @@ class GSTProcessor:
                 
             except Exception as e:
                 self.warnings.append(f"{source_name}: Error processing - {str(e)}")
-                all_metadata.append({'source': source_name, 'error': str(e)})
+                # Include all expected metadata fields for consistency
+                all_metadata.append({
+                    'source': source_name,
+                    'error': str(e),
+                    'original_rows': 0,
+                    'rows_after_cleaning': 0,
+                    'gst_rows': 0,
+                    'non_gst_rows': 0
+                })
         
         # Merge all GST data
         if all_gst:

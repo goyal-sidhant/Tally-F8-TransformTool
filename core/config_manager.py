@@ -245,13 +245,23 @@ class ConfigManager:
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
+
             self.current_config = AppConfig.from_dict(data)
             self._last_saved_hash = self._compute_hash(self.current_config)
             return True
-        except Exception:
+        except json.JSONDecodeError as e:
+            import logging
+            logging.error(f"Failed to parse config file {filepath}: Invalid JSON - {str(e)}")
             return False
-    
+        except KeyError as e:
+            import logging
+            logging.error(f"Failed to load config file {filepath}: Missing required field - {str(e)}")
+            return False
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to load config file {filepath}: {str(e)}")
+            return False
+
     def list_configs(self) -> List[str]:
         """List all saved config files"""
         if not os.path.exists(self.config_dir):
@@ -287,11 +297,21 @@ class ConfigManager:
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
+
             self.current_config = AppConfig.from_dict(data)
             self._last_saved_hash = self._compute_hash(self.current_config)
             return True
-        except Exception:
+        except json.JSONDecodeError as e:
+            import logging
+            logging.error(f"Failed to import config from {filepath}: Invalid JSON - {str(e)}")
+            return False
+        except KeyError as e:
+            import logging
+            logging.error(f"Failed to import config from {filepath}: Missing required field - {str(e)}")
+            return False
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to import config from {filepath}: {str(e)}")
             return False
     
     def reset_to_defaults(self):
@@ -304,6 +324,11 @@ class ConfigManager:
         all_names = []
         for row in self.current_config.tax_config:
             delimiter = row.get('Delimiter', ',')
-            names = [n.strip() for n in row['ColumnNames'].split(delimiter) if n.strip()]
-            all_names.extend(names)
+            # Validate delimiter - use comma as fallback for empty/invalid delimiters
+            if not delimiter or not isinstance(delimiter, str):
+                delimiter = ','
+            column_names = row.get('ColumnNames', '')
+            if column_names:
+                names = [n.strip() for n in column_names.split(delimiter) if n.strip()]
+                all_names.extend(names)
         return list(set(all_names))

@@ -211,7 +211,11 @@ class TaxConfigTab(QWidget):
             return None
 
         # Detect rate - look for patterns like @9%, 9%, @ 9, etc.
-        rate_match = re.search(r'@?\s*(\d+(?:\.\d+)?)\s*%?', col_name)
+        # Use stricter pattern that requires @ symbol or % to avoid matching arbitrary numbers
+        rate_match = re.search(r'(?:@\s*)?(\d+(?:\.\d+)?)\s*%', col_name)
+        if not rate_match:
+            # Try pattern with @ symbol without %
+            rate_match = re.search(r'@\s*(\d+(?:\.\d+)?)\b', col_name)
         if rate_match:
             rate_val = rate_match.group(1)
             # Handle decimal rates (0.05 -> 0.05%)
