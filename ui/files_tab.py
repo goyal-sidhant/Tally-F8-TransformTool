@@ -6,13 +6,106 @@ Handles file selection with visual gaps, row counts, and sheet tooltips.
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton,
     QTreeWidget, QTreeWidgetItem, QHeaderView, QFileDialog,
-    QLabel, QMessageBox, QFrame, QAbstractItemView
+    QLabel, QMessageBox, QFrame, QAbstractItemView, QDialog,
+    QListWidget, QListWidgetItem, QDialogButtonBox, QCheckBox
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QBrush, QFont
 
 from typing import List, Dict, Tuple
 import os
+import glob
+
+
+class FolderPreviewDialog(QDialog):
+    """Dialog to preview files found in a folder before adding"""
+
+    def __init__(self, files: List[str], folder_path: str, parent=None):
+        super().__init__(parent)
+        self.files = files
+        self.selected_files = files.copy()
+        self.setWindowTitle("Files Found in Folder")
+        self.setMinimumSize(600, 400)
+        self._init_ui(folder_path)
+
+    def _init_ui(self, folder_path: str):
+        layout = QVBoxLayout(self)
+
+        # Header
+        header = QLabel(f"Found {len(self.files)} Excel file(s) in:")
+        header.setStyleSheet("font-weight: bold;")
+        layout.addWidget(header)
+
+        folder_label = QLabel(folder_path)
+        folder_label.setStyleSheet("color: gray; font-size: 11px;")
+        folder_label.setWordWrap(True)
+        layout.addWidget(folder_label)
+
+        # Select all checkbox
+        self.chk_select_all = QCheckBox(f"Select All ({len(self.files)} files)")
+        self.chk_select_all.setChecked(True)
+        self.chk_select_all.stateChanged.connect(self._toggle_all)
+        layout.addWidget(self.chk_select_all)
+
+        # File list
+        self.list_widget = QListWidget()
+        self.list_widget.setAlternatingRowColors(True)
+
+        for filepath in self.files:
+            item = QListWidgetItem(os.path.basename(filepath))
+            item.setToolTip(filepath)
+            item.setData(Qt.UserRole, filepath)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked)
+            self.list_widget.addItem(item)
+
+        self.list_widget.itemChanged.connect(self._on_item_changed)
+        layout.addWidget(self.list_widget)
+
+        # Button box
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def _toggle_all(self, state):
+        """Toggle all checkboxes"""
+        self.list_widget.blockSignals(True)
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            item.setCheckState(Qt.Checked if state == Qt.Checked else Qt.Unchecked)
+        self.list_widget.blockSignals(False)
+        self._update_selected()
+
+    def _on_item_changed(self, item):
+        """Handle individual item check change"""
+        self._update_selected()
+
+    def _update_selected(self):
+        """Update selected files list"""
+        self.selected_files = []
+        checked_count = 0
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.checkState() == Qt.Checked:
+                self.selected_files.append(item.data(Qt.UserRole))
+                checked_count += 1
+
+        # Update select all checkbox
+        self.chk_select_all.blockSignals(True)
+        if checked_count == 0:
+            self.chk_select_all.setCheckState(Qt.Unchecked)
+        elif checked_count == self.list_widget.count():
+            self.chk_select_all.setCheckState(Qt.Checked)
+        else:
+            self.chk_select_all.setCheckState(Qt.PartiallyChecked)
+        self.chk_select_all.blockSignals(False)
+
+    def get_selected_files(self) -> List[str]:
+        """Get list of selected files"""
+        return self.selected_files
 
 
 class FilesTab(QWidget):
@@ -46,6 +139,11 @@ class FilesTab(QWidget):
         self.btn_add = QPushButton("Add Files...")
         self.btn_add.clicked.connect(self._add_files)
         header_layout.addWidget(self.btn_add)
+
+        self.btn_add_folder = QPushButton("Add Folder...")
+        self.btn_add_folder.setToolTip("Add all Excel files from a folder (including subfolders)")
+        self.btn_add_folder.clicked.connect(self._add_folder)
+        header_layout.addWidget(self.btn_add_folder)
 
         self.btn_clear = QPushButton("Clear All")
         self.btn_clear.clicked.connect(self._clear_all)
@@ -172,6 +270,56 @@ class FilesTab(QWidget):
 
         if files:
             self._add_files_from_list(files)
+
+    def _add_folder(self):
+        """Open folder dialog and add all Excel files from folder (including subfolders)"""
+        folder_path = QFileDialog.getExistingDirectory(
+            self, "Select Folder with Excel Files", "",
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        )
+
+        if not folder_path:
+            return
+
+        # Scan for Excel files recursively
+        from PyQt5.QtWidgets import QApplication
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+
+        excel_files = []
+        for ext in ['*.xlsx', '*.xls']:
+            # Use recursive glob pattern
+            pattern = os.path.join(folder_path, '**', ext)
+            excel_files.extend(glob.glob(pattern, recursive=True))
+
+        QApplication.restoreOverrideCursor()
+
+        if not excel_files:
+            QMessageBox.information(
+                self, "No Files Found",
+                f"No Excel files (.xlsx, .xls) found in:\n{folder_path}\n\n"
+                "(Including all subfolders)"
+            )
+            return
+
+        # Remove duplicates and sort
+        excel_files = sorted(set(excel_files))
+
+        # Filter out already added files
+        new_files = [f for f in excel_files if f not in self.files]
+
+        if not new_files:
+            QMessageBox.information(
+                self, "No New Files",
+                f"All {len(excel_files)} Excel files from this folder are already added."
+            )
+            return
+
+        # Show preview dialog
+        dialog = FolderPreviewDialog(new_files, folder_path, self)
+        if dialog.exec_() == QDialog.Accepted:
+            selected = dialog.get_selected_files()
+            if selected:
+                self._add_files_from_list(selected)
 
     def _add_files_from_list(self, files: List[str]):
         """Add files from a list of filepaths"""
