@@ -143,6 +143,7 @@ class NonGSTTab(QWidget):
     """Non-GST Transactions Tab"""
 
     prev_tab_requested = pyqtSignal()  # Emitted when Previous button clicked
+    export_full_requested = pyqtSignal()  # Emitted when Export Complete Report clicked
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -174,12 +175,19 @@ class NonGSTTab(QWidget):
 
         btn_layout.addStretch()
 
-        self.btn_export = QPushButton("Export Non-GST Transactions")
+        self.btn_export = QPushButton("Export Non-GST Only")
         self.btn_export.setStyleSheet(
             "background-color: #70AD47; color: white; font-weight: bold; padding: 10px 20px;"
         )
         self.btn_export.clicked.connect(self._export_data)
         btn_layout.addWidget(self.btn_export)
+
+        self.btn_export_full = QPushButton("Export Complete Report")
+        self.btn_export_full.setStyleSheet(
+            "background-color: #4472C4; color: white; font-weight: bold; padding: 10px 20px;"
+        )
+        self.btn_export_full.clicked.connect(lambda: self.export_full_requested.emit())
+        btn_layout.addWidget(self.btn_export_full)
 
         btn_layout.addStretch()
 

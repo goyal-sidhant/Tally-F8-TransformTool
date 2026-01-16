@@ -169,9 +169,11 @@ class MainWindow(QMainWindow):
         # GST tab navigation signals
         self.gst_tab.prev_tab_requested.connect(lambda: self.tabs.setCurrentIndex(2))
         self.gst_tab.next_tab_requested.connect(lambda: self.tabs.setCurrentIndex(4))
+        self.gst_tab.export_full_requested.connect(self._export_complete)
 
         # Non-GST tab navigation signals
         self.non_gst_tab.prev_tab_requested.connect(lambda: self.tabs.setCurrentIndex(3))
+        self.non_gst_tab.export_full_requested.connect(self._export_complete)
 
     def _load_config(self):
         """Load configuration into UI"""

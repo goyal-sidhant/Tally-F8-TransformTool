@@ -11,11 +11,70 @@ from openpyxl.utils import get_column_letter
 from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime
 import os
+import re
+
+
+def sanitize_column_name(col_name: str) -> str:
+    """
+    Sanitize column name for Excel Table XML compatibility.
+    Excel Table column names must be valid XML NCNames.
+    """
+    if col_name is None or str(col_name).strip() == '':
+        return 'Column'
+
+    name = str(col_name).strip()
+
+    # Replace common special characters with readable alternatives
+    replacements = {
+        '@': '_at_',
+        '%': 'pct',
+        '(': '_',
+        ')': '_',
+        '/': '_',
+        '\\': '_',
+        '&': '_and_',
+        '<': '_lt_',
+        '>': '_gt_',
+        '"': '_',
+        "'": '_',
+        ':': '_',
+        ';': '_',
+        ',': '_',
+        '!': '_',
+        '?': '_',
+        '=': '_eq_',
+        '+': '_plus_',
+        '*': '_',
+        '#': 'No',
+        ' ': '_',
+    }
+
+    for char, replacement in replacements.items():
+        name = name.replace(char, replacement)
+
+    # Remove any remaining invalid characters (keep only alphanumeric, underscore, hyphen, period)
+    name = re.sub(r'[^a-zA-Z0-9_.\-]', '_', name)
+
+    # Collapse multiple underscores
+    name = re.sub(r'_+', '_', name)
+
+    # Remove leading/trailing underscores
+    name = name.strip('_')
+
+    # Ensure it starts with a letter or underscore (XML NCName requirement)
+    if name and not name[0].isalpha() and name[0] != '_':
+        name = 'Col_' + name
+
+    # Handle empty result
+    if not name:
+        name = 'Column'
+
+    return name
 
 
 class ExcelReader:
     """Handles reading Excel files and extracting sheet data"""
-    
+
     SUPPORTED_EXTENSIONS = ['.xlsx', '.xls']
     
     @staticmethod
@@ -144,8 +203,6 @@ class ExcelWriter:
             column_types: Dict mapping column names to their types
             column_stats: Dict mapping column names to their stats (type, sum)
         """
-        from openpyxl.worksheet.table import Table, TableStyleInfo
-        
         wb = Workbook()
         
         # Sheet 1: Metadata
@@ -343,39 +400,21 @@ class ExcelWriter:
     @staticmethod
     def _write_data_sheet_as_table(ws, df: pd.DataFrame, sheet_type: str, table_name: str,
                                     column_types: Dict[str, str] = None):
-        """Write data sheet as Excel Table (Ctrl+T style) with index column and highlighted columns"""
-        from openpyxl.worksheet.table import Table, TableStyleInfo
-
+        """Write data sheet with formatting (no Excel Table to avoid corruption)"""
         if df is None or len(df) == 0:
             ws['A1'] = f"No {sheet_type} transactions found"
             return
-        
-        # Add index column to dataframe (avoid collision with existing '#' column)
+
+        # Add index column to dataframe
         df_with_index = df.copy()
-
-        # Deduplicate column names to prevent Excel table corruption
-        cols = df_with_index.columns.tolist()
-        seen = {}
-        new_cols = []
-        for col in cols:
-            col_str = str(col) if col is not None else 'Column'
-            if col_str in seen:
-                seen[col_str] += 1
-                new_cols.append(f"{col_str}_{seen[col_str]}")
-            else:
-                seen[col_str] = 0
-                new_cols.append(col_str)
-        df_with_index.columns = new_cols
-
         index_col_name = '#'
         if index_col_name in df_with_index.columns:
-            # Find a unique name for index column
             counter = 1
             while f'{index_col_name}{counter}' in df_with_index.columns:
                 counter += 1
             index_col_name = f'#{counter}'
         df_with_index.insert(0, index_col_name, range(1, len(df) + 1))
-        
+
         # Define computed/derived columns
         computed_columns = {
             'Active Columns', 'Taxable Value', 'Tax Rates (Config)', 'Tax Rates (Calculated)',
@@ -392,10 +431,9 @@ class ExcelWriter:
             elif col_name.startswith('Total '):
                 return ExcelWriter.TOTAL_FILL  # Light orange
             elif col_name == 'CESS':
-                return ExcelWriter.CGST_SGST_FILL  # Light green (same as CGST/SGST)
+                return ExcelWriter.CGST_SGST_FILL  # Light green
             elif col_name in computed_columns:
-                return ExcelWriter.TAXABLE_COL_FILL  # Light green for other computed
-            # Highlight Taxable data columns (raw data used in taxable value calculation)
+                return ExcelWriter.TAXABLE_COL_FILL  # Light green for computed
             elif column_types and col_name in column_types and column_types[col_name] == 'Taxable':
                 return ExcelWriter.TAXABLE_DATA_FILL  # Light green for taxable data
             return None
@@ -406,16 +444,24 @@ class ExcelWriter:
             fill = get_column_fill(col_name)
             if fill:
                 column_fills[col_idx] = fill
-        
-        # Write headers
+
+        # Write headers with styling
         for col_idx, col_name in enumerate(df_with_index.columns, 1):
             cell = ws.cell(row=1, column=col_idx, value=col_name)
-            # Headers will be styled by the table
-        
+            cell.fill = ExcelWriter.HEADER_FILL
+            cell.font = ExcelWriter.HEADER_FONT
+            cell.border = ExcelWriter.BORDER
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
+        # Alternating row colors
+        alt_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+
         # Write data with highlighting
         for row_idx, row in enumerate(df_with_index.itertuples(index=False), 2):
+            is_alt_row = (row_idx % 2 == 0)
             for col_idx, value in enumerate(row, 1):
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                cell.border = ExcelWriter.BORDER
 
                 # Format numbers
                 if isinstance(value, (int, float)) and not pd.isna(value):
@@ -424,10 +470,12 @@ class ExcelWriter:
                     else:
                         cell.number_format = '#,##0.00'
 
-                # Apply column-specific fill color
+                # Apply column-specific fill color (priority)
                 if col_idx in column_fills:
                     cell.fill = column_fills[col_idx]
-        
+                elif is_alt_row:
+                    cell.fill = alt_fill
+
         # Auto-adjust column widths
         for col_idx, col_name in enumerate(df_with_index.columns, 1):
             max_length = len(str(col_name))
@@ -435,31 +483,12 @@ class ExcelWriter:
                 cell_value = ws.cell(row=row_idx, column=col_idx).value
                 if cell_value:
                     max_length = max(max_length, len(str(cell_value)))
-            
+
             adjusted_width = min(max_length + 2, 50)
             ws.column_dimensions[get_column_letter(col_idx)].width = adjusted_width
-        
-        # Create Excel Table
-        last_col = get_column_letter(len(df_with_index.columns))
-        last_row = len(df_with_index) + 1
-        table_ref = f"A1:{last_col}{last_row}"
-        
-        # Create table with style
-        table = Table(displayName=table_name, ref=table_ref)
-        
-        # Use a medium blue style (TableStyleMedium2 is a nice blue)
-        style = TableStyleInfo(
-            name="TableStyleMedium2",
-            showFirstColumn=False,
-            showLastColumn=False,
-            showRowStripes=True,
-            showColumnStripes=False
-        )
-        table.tableStyleInfo = style
-        
-        ws.add_table(table)
-        
-        # NO freeze panes - user requested no freezing
+
+        # Freeze header row for easier navigation
+        ws.freeze_panes = 'A2'
 
 
 class ExcelExporter:
