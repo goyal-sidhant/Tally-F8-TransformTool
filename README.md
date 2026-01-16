@@ -2,10 +2,19 @@
 
 A PyQt5 Windows application for transforming Tally ERP GST data exports into structured formats suitable for GST compliance and ITC analysis in India.
 
+## What's New in v2.0
+
+- **Redesigned UI**: Separate tabs for Files, Columns, and Tax Config
+- **Improved Files Tab**: Visual file tree with row counts per sheet
+- **Side-by-side Layouts**: Column List and Exclusion List visible together
+- **Simplified Tax Config**: Shows only Tax-marked columns (no 40+ default rows)
+- **Auto-assign Feature**: Automatically detects tax type and rate from column names
+- **Better UX**: Process/Export buttons on every tab for convenience
+
 ## Features
 
-- **Multiple File Support**: Process multiple Excel files simultaneously
-- **Multi-Sheet Selection**: Select specific sheets from each file
+- **Multiple File Support**: Process multiple Excel files simultaneously with drag-and-drop
+- **Multi-Sheet Selection**: Select specific sheets from each file with row counts
 - **Configuration-Driven**: Flexible tax column mapping and exclusion lists
 - **Automatic Header Detection**: Finds "Date" and "Particulars" in Tally exports
 - **Grand Total Removal**: Automatically filters out summary rows
@@ -40,43 +49,35 @@ python main.py
 
 ## Usage
 
-### Step 1: Add Files
+### Tab 1: Files
 
-1. Click "Add File(s)..." in the Setup tab
-2. Select one or more Excel files (.xlsx or .xls)
-3. Check/uncheck sheets you want to process
+1. Click "Add Files..." or drag-and-drop Excel files
+2. Check/uncheck sheets you want to process
+3. View row counts per sheet
 
-### Step 2: Configure Columns
+### Tab 2: Columns
 
-1. Click "Scan Columns from Selected Files"
-2. Review the column list - columns are auto-categorized:
-   - **[T] Tax**: Columns configured in Tax Configuration
-   - **[E] Excluded**: Columns in Exclusion List
+1. Columns auto-populate after adding files
+2. Mark columns as Tax, Excluded, or Taxable:
+   - **[T] Tax**: Tax columns (CGST, SGST, IGST, CESS)
+   - **[E] Excluded**: Columns excluded from taxable value
    - **[S] Standard**: Standard columns (Date, Particulars, etc.)
    - **[ ] Taxable**: Columns contributing to taxable value
+3. Use "Auto-detect Tax" to find tax columns by name
+4. Manage Exclusion List on the right panel
 
-### Step 3: Adjust Configuration (if needed)
+### Tab 3: Tax Config
 
-**Tax Configuration:**
-- Add new tax column mappings
-- TaxType: CGST, SGST, IGST, or CESS
-- TaxRate: Percentage (e.g., "9%", "0.05%") or "Generic"
-- ColumnNames: Comma-separated list of column names
-- Delimiter: Usually comma (,)
+1. Tax-marked columns appear automatically
+2. Assign Tax Type (CGST/SGST/IGST/CESS) and Rate
+3. Use "Auto-assign by Name" to detect from column names
+4. View mapping preview (e.g., "→ CGST_9%")
 
-**Exclusion List:**
-- Add columns that should NOT contribute to taxable value
-- Common: Round Off, TDS Payable, Discount
+### Process & Export
 
-### Step 4: Process Data
-
-1. Click "Process Data"
-2. Review results in GST Transactions and Non-GST Transactions tabs
-
-### Step 5: Export
-
-- **Individual Export**: Use "Export" button in each tab
-- **Complete Report**: Use File → Export Complete Report
+- Click "Process Data" from any tab
+- Results appear in GST Transactions and Non-GST Transactions tabs
+- Export complete report with File → Export Complete Report
 
 ## Output Structure
 
@@ -106,38 +107,97 @@ python main.py
 ## Configuration Management
 
 ### Save Configuration
-- File → Save Configuration (or Setup tab button)
+- Configuration → Save Configuration
 - Enter client name
-- Auto-versioned with timestamp if changes detected
+- Auto-versioned with timestamp
 
 ### Load Configuration
-- File → Load Configuration
+- Configuration → Load Configuration
 - Select from saved configurations
 
 ### Configuration Location
 - Stored in: `~/.gst_tool_configs/`
 - Format: JSON files
 
-## Technical Details
+## Switching to Old UI
 
-### Supported File Formats
-- `.xlsx` (Excel 2007+)
-- `.xls` (Legacy Excel)
+If you prefer the v1.x single-tab layout, the backup file `setup_tab.py` is retained. To switch:
 
-### Header Detection
-The tool looks for rows containing both "Date" and "Particulars" in the first 3 columns.
+```python
+# In main.py, comment out new imports:
+# from ui.files_tab import FilesTab
+# from ui.columns_tab import ColumnsTab
+# from ui.tax_config_tab import TaxConfigTab
 
-### Tax Rate Processing
-- Decimal rates (0.05%) are converted to percentage (5%)
-- CGST + SGST are combined for display (9% + 9% = 18%)
-- Generic columns are labeled as "Generic"
-
-### Taxable Value Calculation
+# Uncomment old import:
+from ui.setup_tab import SetupTab
 ```
-Taxable Value = Sum of all numeric columns 
-                - Tax columns 
-                - Exclusion list columns
+
+## Project Structure
+
 ```
+gst_tool/
+├── main.py              # Application entry point (v2.0)
+├── requirements.txt     # Python dependencies
+├── README.md           # This file
+├── core/
+│   ├── __init__.py
+│   ├── processor.py    # Core processing logic
+│   └── config_manager.py # Configuration management
+├── ui/
+│   ├── __init__.py
+│   ├── widgets/        # NEW: Shared widgets
+│   │   ├── __init__.py
+│   │   └── multi_select.py
+│   ├── files_tab.py    # NEW: Tab 1 - Files
+│   ├── columns_tab.py  # NEW: Tab 2 - Columns
+│   ├── tax_config_tab.py # NEW: Tab 3 - Tax Config
+│   ├── setup_tab.py    # BACKUP: Old combined UI
+│   ├── gst_tab.py      # GST transactions tab
+│   └── non_gst_tab.py  # Non-GST transactions tab
+└── utils/
+    ├── __init__.py
+    ├── excel_handler.py # Excel read/write utilities
+    └── helpers.py       # Common helper functions
+```
+
+## Roadmap
+
+### Version 2.0 (Current)
+- [x] UI Restructuring: 3 separate tabs for Files, Columns, Tax Config
+- [x] Improved Files Tab: Visual tree with row counts, sheet tooltips
+- [x] Columns Tab: Side-by-side Column List + Exclusion List
+- [x] Tax Config Tab: Simplified view showing only Tax-marked columns
+- [x] Auto-assign tax columns by name detection
+
+### Version 2.1 (Planned)
+- [ ] Data preview before processing
+- [ ] Progress feedback during file scan
+- [ ] Undo/Redo for column markings
+
+### Version 2.2 (Future)
+- [ ] Batch export (multiple files → multiple outputs)
+- [ ] GSTR-1/3B JSON generation
+- [ ] Summary dashboard with pivot analysis
+
+### Version 3.0 (Long-term)
+- [ ] GSTR-2A/2B reconciliation
+- [ ] Direct GST portal integration
+- [ ] Multi-company consolidated processing
+
+## Version History
+
+- **v2.0** (January 2025): UI Redesign
+  - Separate tabs for Files, Columns, Tax Config
+  - Improved UX with side-by-side layouts
+  - Auto-assign tax columns by name
+  - Process/Export buttons on every tab
+
+- **v1.0** (January 2025): Initial release
+  - Port from Power Query M Code
+  - Multiple file/sheet support
+  - Configuration versioning
+  - Dual tax rate calculation
 
 ## Troubleshooting
 
@@ -153,39 +213,9 @@ Taxable Value = Sum of all numeric columns
 - Process files in batches for very large datasets
 - Close other applications if memory is limited
 
-## Project Structure
-
-```
-gst_tool/
-├── main.py              # Application entry point
-├── requirements.txt     # Python dependencies
-├── README.md           # This file
-├── core/
-│   ├── __init__.py
-│   ├── processor.py    # Core processing logic
-│   └── config_manager.py # Configuration management
-├── ui/
-│   ├── __init__.py
-│   ├── setup_tab.py    # Setup tab UI
-│   ├── gst_tab.py      # GST transactions tab
-│   └── non_gst_tab.py  # Non-GST transactions tab
-└── utils/
-    ├── __init__.py
-    ├── excel_handler.py # Excel read/write utilities
-    └── helpers.py       # Common helper functions
-```
-
-## Version History
-
-- **v1.0** (January 2025): Initial release
-  - Port from Power Query M Code
-  - Multiple file/sheet support
-  - Configuration versioning
-  - Dual tax rate calculation
-
 ## Author
 
-**Sidhant**  
+**Sidhant**
 Contact: 7003395384
 
 ## Acknowledgments
