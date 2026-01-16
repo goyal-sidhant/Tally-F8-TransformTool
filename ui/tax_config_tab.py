@@ -21,6 +21,8 @@ class TaxConfigTab(QWidget):
     config_changed = pyqtSignal()
     process_requested = pyqtSignal()
     export_requested = pyqtSignal()
+    prev_tab_requested = pyqtSignal()  # Emitted when Previous button clicked
+    next_tab_requested = pyqtSignal()  # Emitted when Next button clicked
 
     # Standard tax rates
     TAX_RATES = ['Generic', '0%', '0.05%', '0.1%', '0.125%', '0.25%',
@@ -107,6 +109,17 @@ class TaxConfigTab(QWidget):
         # Action buttons
         action_layout = QHBoxLayout()
 
+        # Previous button
+        self.btn_prev = QPushButton("← Previous")
+        self.btn_prev.setStyleSheet(
+            "background-color: #5B9BD5; color: white; font-weight: bold; padding: 10px 20px;"
+        )
+        self.btn_prev.clicked.connect(lambda: self.prev_tab_requested.emit())
+        action_layout.addWidget(self.btn_prev)
+
+        # Center spacer
+        action_layout.addStretch()
+
         self.btn_process = QPushButton("Process Data")
         self.btn_process.setStyleSheet(
             "background-color: #4472C4; color: white; font-weight: bold; padding: 10px 20px;"
@@ -121,7 +134,17 @@ class TaxConfigTab(QWidget):
         self.btn_export.clicked.connect(lambda: self.export_requested.emit())
         action_layout.addWidget(self.btn_export)
 
+        # Center spacer
         action_layout.addStretch()
+
+        # Next button
+        self.btn_next = QPushButton("Next →")
+        self.btn_next.setStyleSheet(
+            "background-color: #5B9BD5; color: white; font-weight: bold; padding: 10px 20px;"
+        )
+        self.btn_next.clicked.connect(lambda: self.next_tab_requested.emit())
+        action_layout.addWidget(self.btn_next)
+
         layout.addLayout(action_layout)
 
         self._update_visibility()

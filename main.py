@@ -150,16 +150,28 @@ class MainWindow(QMainWindow):
         self.files_tab.files_changed.connect(self._on_files_changed)
         self.files_tab.process_requested.connect(self._process_data)
         self.files_tab.export_requested.connect(self._export_complete)
+        self.files_tab.next_tab_requested.connect(lambda: self.tabs.setCurrentIndex(1))
 
         # Columns tab signals
         self.columns_tab.column_marked.connect(self._on_column_marked)
         self.columns_tab.process_requested.connect(self._process_data)
         self.columns_tab.export_requested.connect(self._export_complete)
+        self.columns_tab.prev_tab_requested.connect(lambda: self.tabs.setCurrentIndex(0))
+        self.columns_tab.next_tab_requested.connect(lambda: self.tabs.setCurrentIndex(2))
 
         # Tax config tab signals
         self.tax_config_tab.config_changed.connect(self._on_config_changed)
         self.tax_config_tab.process_requested.connect(self._process_data)
         self.tax_config_tab.export_requested.connect(self._export_complete)
+        self.tax_config_tab.prev_tab_requested.connect(lambda: self.tabs.setCurrentIndex(1))
+        self.tax_config_tab.next_tab_requested.connect(lambda: self.tabs.setCurrentIndex(3))
+
+        # GST tab navigation signals
+        self.gst_tab.prev_tab_requested.connect(lambda: self.tabs.setCurrentIndex(2))
+        self.gst_tab.next_tab_requested.connect(lambda: self.tabs.setCurrentIndex(4))
+
+        # Non-GST tab navigation signals
+        self.non_gst_tab.prev_tab_requested.connect(lambda: self.tabs.setCurrentIndex(3))
 
     def _load_config(self):
         """Load configuration into UI"""

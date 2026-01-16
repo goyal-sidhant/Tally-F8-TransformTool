@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
     QMessageBox, QFrame
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QBrush, QFont
 
 import pandas as pd
@@ -141,7 +141,9 @@ class NonGSTDataTableWidget(QTableWidget):
 
 class NonGSTTab(QWidget):
     """Non-GST Transactions Tab"""
-    
+
+    prev_tab_requested = pyqtSignal()  # Emitted when Previous button clicked
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.data = None
@@ -159,15 +161,28 @@ class NonGSTTab(QWidget):
         self.table = NonGSTDataTableWidget()
         layout.addWidget(self.table)
         
-        # Export button
+        # Navigation and Export buttons
         btn_layout = QHBoxLayout()
+
+        # Previous button
+        self.btn_prev = QPushButton("← Previous")
+        self.btn_prev.setStyleSheet(
+            "background-color: #5B9BD5; color: white; font-weight: bold; padding: 10px 20px;"
+        )
+        self.btn_prev.clicked.connect(lambda: self.prev_tab_requested.emit())
+        btn_layout.addWidget(self.btn_prev)
+
         btn_layout.addStretch()
-        
+
         self.btn_export = QPushButton("Export Non-GST Transactions")
-        self.btn_export.setStyleSheet("padding: 8px 20px;")
+        self.btn_export.setStyleSheet(
+            "background-color: #70AD47; color: white; font-weight: bold; padding: 10px 20px;"
+        )
         self.btn_export.clicked.connect(self._export_data)
         btn_layout.addWidget(self.btn_export)
-        
+
+        btn_layout.addStretch()
+
         layout.addLayout(btn_layout)
     
     def set_data(self, df: pd.DataFrame):

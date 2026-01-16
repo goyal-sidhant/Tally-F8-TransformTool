@@ -21,6 +21,8 @@ class ColumnsTab(QWidget):
     column_marked = pyqtSignal(str, str)  # column_name, mark_type ('Tax', 'Excluded', 'Taxable')
     process_requested = pyqtSignal()
     export_requested = pyqtSignal()
+    prev_tab_requested = pyqtSignal()  # Emitted when Previous button clicked
+    next_tab_requested = pyqtSignal()  # Emitted when Next button clicked
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -182,6 +184,17 @@ class ColumnsTab(QWidget):
         # Action buttons
         btn_layout = QHBoxLayout()
 
+        # Previous button
+        self.btn_prev = QPushButton("← Previous")
+        self.btn_prev.setStyleSheet(
+            "background-color: #5B9BD5; color: white; font-weight: bold; padding: 10px 20px;"
+        )
+        self.btn_prev.clicked.connect(lambda: self.prev_tab_requested.emit())
+        btn_layout.addWidget(self.btn_prev)
+
+        # Center spacer
+        btn_layout.addStretch()
+
         self.btn_process = QPushButton("Process Data")
         self.btn_process.setStyleSheet(
             "background-color: #4472C4; color: white; font-weight: bold; padding: 10px 20px;"
@@ -196,7 +209,17 @@ class ColumnsTab(QWidget):
         self.btn_export.clicked.connect(lambda: self.export_requested.emit())
         btn_layout.addWidget(self.btn_export)
 
+        # Center spacer
         btn_layout.addStretch()
+
+        # Next button
+        self.btn_next = QPushButton("Next →")
+        self.btn_next.setStyleSheet(
+            "background-color: #5B9BD5; color: white; font-weight: bold; padding: 10px 20px;"
+        )
+        self.btn_next.clicked.connect(lambda: self.next_tab_requested.emit())
+        btn_layout.addWidget(self.btn_next)
+
         layout.addLayout(btn_layout)
 
     def _auto_detect_tax_columns(self):
