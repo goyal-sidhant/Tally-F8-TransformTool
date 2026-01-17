@@ -436,6 +436,9 @@ class ExcelWriter:
                 return (ExcelWriter.CGST_SGST_FILL, True)  # Light green - all cells
             elif col_name in computed_columns:
                 return (ExcelWriter.TAXABLE_COL_FILL, True)  # Light green - all cells
+            # Raw tax columns marked as 'Tax' in column_types (e.g., "Input RCM Cgst @9%")
+            elif column_types and col_name in column_types and column_types[col_name] == 'Tax':
+                return (ExcelWriter.TAX_COL_FILL, False)  # Light blue - NON-ZERO cells only
             elif column_types and col_name in column_types and column_types[col_name] == 'Taxable':
                 return (ExcelWriter.TAXABLE_DATA_FILL, False)  # Light green - NON-ZERO cells only
             return (None, False)
