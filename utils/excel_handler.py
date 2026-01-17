@@ -511,9 +511,24 @@ class ExcelWriter:
         Reopen saved file and convert GST/Non-GST sheets to Excel Tables with no style.
         This is done as a separate step after initial save to avoid corruption issues.
         """
+        import time
         from openpyxl.worksheet.table import Table, TableStyleInfo
 
-        wb = load_workbook(filepath)
+        # Retry mechanism for network paths (file may not be immediately accessible)
+        max_retries = 3
+        wb = None
+        for attempt in range(max_retries):
+            try:
+                wb = load_workbook(filepath)
+                break
+            except (FileNotFoundError, OSError):
+                if attempt < max_retries - 1:
+                    time.sleep(1)  # Wait 1 second before retry
+                else:
+                    raise  # Give up after max retries
+
+        if wb is None:
+            return  # Could not open file
 
         for sheet_name in ['GST Transactions', 'Non-GST Transactions']:
             if sheet_name in wb.sheetnames:
