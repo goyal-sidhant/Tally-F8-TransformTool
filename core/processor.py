@@ -112,12 +112,12 @@ class GSTProcessor:
         self.tax_marked_columns = tax_marked_columns or []
         self.standard_columns = standard_columns if standard_columns is not None else self.DEFAULT_STANDARD_COLUMNS
         self.tax_mapper = TaxColumnMapper(tax_config)
+        self.warnings = []  # Initialize warnings list
 
     @staticmethod
     def normalize_column_name(name: str) -> str:
         """Normalize column name for comparison (collapse whitespace, lowercase)"""
         return ' '.join(str(name).lower().split())
-        self.warnings = []
     
     def find_header_row(self, df: pd.DataFrame) -> int:
         """
@@ -511,10 +511,31 @@ class GSTProcessor:
         # Convert currency columns
         df = self.convert_currency_columns(df)
         
-        # Get existing tax columns in data
+        # Get existing tax columns in data using normalized comparison
+        # This handles whitespace/case differences between config and data column names
         all_tax_cols = self.tax_mapper.get_all_tax_columns()
-        existing_tax_cols = [c for c in all_tax_cols if c in df.columns]
-        existing_mappings = self.tax_mapper.get_existing_mappings(df.columns.tolist())
+
+        # Build normalized lookup: {normalized_config_name: config_name}
+        config_cols_normalized = {self.normalize_column_name(c): c for c in all_tax_cols}
+
+        # Find existing tax columns using normalized comparison
+        # Use DATA column names (not config names) for consistency
+        existing_tax_cols = []
+        for data_col in df.columns:
+            normalized = self.normalize_column_name(data_col)
+            if normalized in config_cols_normalized:
+                existing_tax_cols.append(data_col)
+
+        # Build mappings with normalized comparison
+        # Maps DATA column name -> standardized name (e.g., "Input RCM Cgst @9%" -> "CGST_9%")
+        existing_mappings = {}
+        for data_col in df.columns:
+            normalized = self.normalize_column_name(data_col)
+            if normalized in config_cols_normalized:
+                config_col = config_cols_normalized[normalized]
+                mapped_name = self.tax_mapper.get_mapped_name(config_col)
+                if mapped_name:
+                    existing_mappings[data_col] = mapped_name
         
         # Add source column
         df['Source'] = source_name

@@ -422,28 +422,30 @@ class ExcelWriter:
         }
 
         # Determine fill color for each column based on type
-        def get_column_fill(col_name):
-            """Get the appropriate fill color for a column based on its type"""
+        # Returns (fill, apply_to_all_cells) tuple
+        # apply_to_all_cells=True for tax/computed columns, False for Taxable data columns
+        def get_column_fill_info(col_name):
+            """Get the fill color and whether to apply to all cells or only non-zero"""
             if col_name.startswith(('CGST_', 'SGST_')):
-                return ExcelWriter.CGST_SGST_FILL  # Light green
+                return (ExcelWriter.CGST_SGST_FILL, True)  # Light green - all cells
             elif col_name.startswith('IGST_'):
-                return ExcelWriter.IGST_FILL  # Light blue
+                return (ExcelWriter.IGST_FILL, True)  # Light blue - all cells
             elif col_name.startswith('Total '):
-                return ExcelWriter.TOTAL_FILL  # Light orange
+                return (ExcelWriter.TOTAL_FILL, True)  # Light orange - all cells
             elif col_name == 'CESS':
-                return ExcelWriter.CGST_SGST_FILL  # Light green
+                return (ExcelWriter.CGST_SGST_FILL, True)  # Light green - all cells
             elif col_name in computed_columns:
-                return ExcelWriter.TAXABLE_COL_FILL  # Light green for computed
+                return (ExcelWriter.TAXABLE_COL_FILL, True)  # Light green - all cells
             elif column_types and col_name in column_types and column_types[col_name] == 'Taxable':
-                return ExcelWriter.TAXABLE_DATA_FILL  # Light green for taxable data
-            return None
+                return (ExcelWriter.TAXABLE_DATA_FILL, False)  # Light green - NON-ZERO cells only
+            return (None, False)
 
-        # Track column fills by index
-        column_fills = {}
+        # Track column fill info by index: {col_idx: (fill, apply_to_all)}
+        column_fill_info = {}
         for col_idx, col_name in enumerate(df_with_index.columns, 1):
-            fill = get_column_fill(col_name)
+            fill, apply_to_all = get_column_fill_info(col_name)
             if fill:
-                column_fills[col_idx] = fill
+                column_fill_info[col_idx] = (fill, apply_to_all)
 
         # Write headers with styling
         for col_idx, col_name in enumerate(df_with_index.columns, 1):
@@ -476,8 +478,15 @@ class ExcelWriter:
                         cell.number_format = '#,##0.00'
 
                 # Apply column-specific fill color
-                if col_idx in column_fills:
-                    cell.fill = column_fills[col_idx]
+                if col_idx in column_fill_info:
+                    fill, apply_to_all = column_fill_info[col_idx]
+                    if apply_to_all:
+                        # Tax/computed columns - highlight all cells
+                        cell.fill = fill
+                    else:
+                        # Taxable data columns - only highlight non-zero values
+                        if isinstance(value, (int, float)) and not pd.isna(value) and value != 0:
+                            cell.fill = fill
 
         # Auto-adjust column widths
         for col_idx, col_name in enumerate(df_with_index.columns, 1):
@@ -512,10 +521,10 @@ class ExcelWriter:
                     last_col = get_column_letter(ws.max_column)
                     table_ref = f"A1:{last_col}{ws.max_row}"
 
-                    # Create table with no visible style
+                    # Create table with "None" style (no style at all)
                     table = Table(displayName=table_name, ref=table_ref)
                     style = TableStyleInfo(
-                        name="TableStyleLight1",
+                        name=None,  # None = "None" style in Excel (no visible formatting)
                         showFirstColumn=False,
                         showLastColumn=False,
                         showRowStripes=False,
